@@ -224,6 +224,10 @@ printf 'Created %s for %s\n' "$JOB" "$SOURCE_TYPE"
 kubectl -n kvorum logs -f "$JOB"
 ```
 
+The Discourse backfill intentionally sends at most one request every five seconds. A full thread
+can need multiple `/posts.json` requests, so several minutes between tick lines is normal. Do not
+cancel a healthy Job solely because the next tick has not printed yet.
+
 Apply the same capacity and cancellation gates to every targeted Job. Keep each Job name and final
 summary in the operator record.
 
