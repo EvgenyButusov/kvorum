@@ -13,13 +13,13 @@ import { createSnapshotPlugin, SnapshotClient } from '@sources/snapshot';
 /** UA sent on Discourse backfill requests (the anonymous API is User-Agent-sensitive; ADR-071). */
 const DEFAULT_BACKFILL_USER_AGENT = 'kvorum-backfill/1.0 (+https://kvorum.watch)';
 
-/** The direct backfill drains ticks every 250ms and can otherwise exhaust a forum's stricter
- *  anonymous limit when full threads require several `/posts.json` requests. Live polling has a
- *  15s interval; use a deliberately conservative per-host budget for the faster backfill path. */
+/** The direct backfill drains ticks every 250ms and can otherwise trigger Cloudflare's managed
+ *  challenge when full threads require several `/posts.json` requests. Live polling has a 15s
+ *  interval; keep the faster backfill path to one request every five seconds. */
 const DISCOURSE_BACKFILL_PACER = {
-  maxPerShortWindow: 10,
-  shortWindowMs: 10_000,
-  maxPerLongWindow: 50,
+  maxPerShortWindow: 1,
+  shortWindowMs: 5_000,
+  maxPerLongWindow: 12,
   longWindowMs: 60_000,
 } as const;
 
