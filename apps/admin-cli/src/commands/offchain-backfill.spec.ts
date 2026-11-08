@@ -117,6 +117,27 @@ describe('runOffChainDrain', () => {
     expect(outcome.ticks).toBe(4);
   });
 
+  it('stops after committing a listener-reported source boundary', async () => {
+    const { listener, cursorsSeen } = scriptedListener([
+      { items: [item('a')], nextCursor: { page: 1 } },
+      { items: [item('b')], nextCursor: { page: 0 }, caughtUp: true },
+      { items: [item('should-not-run')], nextCursor: { page: 1 } },
+    ]);
+    const { producer, committed } = fakeProducer();
+
+    const outcome = await runOffChainDrain({
+      source,
+      listener,
+      producer,
+      options: opts,
+      signal: new AbortController().signal,
+    });
+
+    expect(outcome).toEqual({ status: 'completed', ticks: 2, itemsProcessed: 2 });
+    expect(committed.map((i) => i.externalId)).toEqual(['a', 'b']);
+    expect(cursorsSeen).toHaveLength(2);
+  });
+
   it('treats a boundary re-read (items > 0 but cursor unchanged) as quiescent and stops', async () => {
     // The tip page keeps returning the same item at an unchanged cursor. Old logic reset quiescence
     // on any non-empty tick and looped forever; the drain must now terminate.
