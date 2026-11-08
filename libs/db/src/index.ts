@@ -32,7 +32,11 @@ export type {
 } from './actor-repository';
 export type { ActiveApiKeyResult, SafeApiKey } from './api-key-repository';
 export { ApiKeyRepository } from './api-key-repository';
-export type { ArchiveDerivationRow, OffchainArchiveRow } from './archive-derivation-repository';
+export type {
+  ArchiveDerivationRow,
+  EvmArchiveTuple,
+  OffchainArchiveRow,
+} from './archive-derivation-repository';
 export { ArchiveDerivationRepository } from './archive-derivation-repository';
 export { ArchiveDerivationAdminRepository } from './archive-derivation-admin-repository';
 export { ArchiveActorResolutionRepository } from './archive-actor-resolution-repository';

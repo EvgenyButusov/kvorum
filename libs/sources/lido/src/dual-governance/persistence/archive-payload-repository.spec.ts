@@ -66,4 +66,28 @@ describe('DualGovernanceArchivePayloadRepository', () => {
       );
     });
   });
+
+  describe('findProposalSubmitted', () => {
+    it('finds a submission by source, chain, event type and payload id', async () => {
+      const found = [{ event_type: 'ProposalSubmitted', payload: '{"id":"7"}' }];
+      const { chDb, chain } = makeChDb(found);
+      const repo = new DualGovernanceArchivePayloadRepository(chDb);
+
+      await expect(repo.findProposalSubmitted('src-1', '0x1', '7')).resolves.toBe(found[0]);
+
+      expect(chain.where.mock.calls.slice(0, 3)).toEqual([
+        ['dao_source_id', '=', 'src-1'],
+        ['chain_id', '=', '0x1'],
+        ['event_type', '=', 'ProposalSubmitted'],
+      ]);
+      expect(chain.where).toHaveBeenCalledTimes(4);
+      expect(chain.orderBy).toHaveBeenCalledWith('received_at', 'asc');
+    });
+
+    it('returns undefined when the proposal submission is absent', async () => {
+      const { chDb } = makeChDb([]);
+      const repo = new DualGovernanceArchivePayloadRepository(chDb);
+      await expect(repo.findProposalSubmitted('src-1', '0x1', '404')).resolves.toBeUndefined();
+    });
+  });
 });
