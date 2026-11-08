@@ -23,7 +23,9 @@ interface DualGovernanceAddressCandidate {
  * state-history applier (AB2) run. AB3 adds the proposal-flow events the proposal applier derives: the
  * DG `ProposalSubmittedMeta` carries the proposer account; the Timelock id-only events and the
  * calls-carrying `ProposalSubmitted` (whose `executor` is the AdminExecutor contract, not a
- * participant) have none, so they resolve to `[]` and are still released to the applier.
+ * participant) have none, so they resolve to `[]` and are still released to the applier. Reference
+ * and configuration events are also listed so the state applier can drain them as no-ops and keep
+ * the zero-underived acceptance gate meaningful.
  */
 export class LidoDualGovernanceActorAddressDeriver implements ActorAddressDeriver {
   readonly kind = 'actor-address' as const;
@@ -35,6 +37,17 @@ export class LidoDualGovernanceActorAddressDeriver implements ActorAddressDerive
     'ProposalExecuted',
     'ProposalsCancelledTill',
     'ProposalSubmittedMeta',
+    'NewSignallingEscrowDeployed',
+    'EscrowMasterCopyDeployed',
+    'ConfigProviderSet',
+    'ProposalsCancellerSet',
+    'CancelAllPendingProposalsExecuted',
+    'CancelAllPendingProposalsSkipped',
+    'ProposerRegistered',
+    'ProposerExecutorSet',
+    'ProposerUnregistered',
+    'EmergencyModeActivated',
+    'EmergencyModeDeactivated',
   ] as const satisfies readonly ArchiveEventType[];
 
   constructor(private readonly payloads: DualGovernanceArchivePayloadRepository) {}
@@ -64,9 +77,10 @@ export class LidoDualGovernanceActorAddressDeriver implements ActorAddressDerive
       }
       return [];
     }
-    // State transitions, the Timelock id-only events, and the calls-carrying ProposalSubmitted have no
-    // participant address (escrow/config/executor in payloads are contracts). [] still lets the sweep
-    // mark the row resolved so the projection appliers run.
+    // State transitions, Timelock id-only events, reference/configuration events, and the
+    // calls-carrying ProposalSubmitted have no participant address (escrow/config/executor in
+    // payloads are contracts). [] still lets the sweep mark the row resolved so the projection
+    // appliers run.
     return [];
   }
 }

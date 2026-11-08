@@ -45,6 +45,7 @@ const STATE_PAYLOAD = JSON.stringify({
 
 function makeDeps(over: {
   payload?: string | undefined;
+  eventType?: string;
   daoId?: string | undefined;
   inserted?: boolean;
   resolvable?: Array<Record<string, unknown>>;
@@ -89,7 +90,7 @@ function makeDeps(over: {
                 tx_hash: TX,
                 log_index: 0,
                 block_hash: BLOCK_HASH,
-                event_type: 'DualGovernanceStateChanged',
+                event_type: over.eventType ?? 'DualGovernanceStateChanged',
                 payload: over.payload,
                 received_at: new Date(),
               },
@@ -136,12 +137,50 @@ function pendingLedgerRow(proposalId: string) {
 }
 
 describe('DualGovernanceStateProjectionApplier', () => {
-  it('declares the projection contract for dual_governance state events', () => {
+  it('declares the state and archive-only reference events', () => {
     const { deps } = makeDeps({ payload: STATE_PAYLOAD, daoId: 'dao-1' });
     const applier = new DualGovernanceStateProjectionApplier(deps);
     expect(applier.kind).toBe('projection');
     expect(applier.sourceTypes).toEqual(['dual_governance']);
-    expect(applier.eventTypes).toEqual(['DualGovernanceStateChanged']);
+    expect(applier.eventTypes).toEqual([
+      'DualGovernanceStateChanged',
+      'NewSignallingEscrowDeployed',
+      'EscrowMasterCopyDeployed',
+      'ConfigProviderSet',
+      'ProposalsCancellerSet',
+      'CancelAllPendingProposalsExecuted',
+      'CancelAllPendingProposalsSkipped',
+      'ProposerRegistered',
+      'ProposerExecutorSet',
+      'ProposerUnregistered',
+      'EmergencyModeActivated',
+      'EmergencyModeDeactivated',
+    ]);
+  });
+
+  it.each([
+    'NewSignallingEscrowDeployed',
+    'EscrowMasterCopyDeployed',
+    'ConfigProviderSet',
+    'ProposalsCancellerSet',
+    'CancelAllPendingProposalsExecuted',
+    'CancelAllPendingProposalsSkipped',
+    'ProposerRegistered',
+    'ProposerExecutorSet',
+    'ProposerUnregistered',
+    'EmergencyModeActivated',
+    'EmergencyModeDeactivated',
+  ] as const)('drains %s as an archive-only reference event', async (eventType) => {
+    const { deps, archive, history } = makeDeps({
+      payload: '{}',
+      eventType,
+      daoId: 'dao-1',
+    });
+    await new DualGovernanceStateProjectionApplier(deps).applyBatch([
+      makeRow({ event_type: eventType }),
+    ]);
+    expect(archive.markDerived).toHaveBeenCalledWith('row-1');
+    expect(history.insert).not.toHaveBeenCalled();
   });
 
   it('inserts a history row + marks the archive derived', async () => {
