@@ -44,11 +44,11 @@ export interface OffChainDrainOutcome {
  * Drives a from-genesis off-chain backfill to completion by repeatedly polling the listener and
  * committing each tick through the sink (enqueue or --direct), resuming from the persisted cursor.
  *
- * `PollResult` has no `done` flag (the transport was built for perpetual live polling), so completion
- * is inferred: the drain stops after `quiescenceTicks` consecutive ticks that leave the cursor
- * unadvanced (no forward progress) — whether the tick was empty or re-read the same tip page. A
- * conservative default (K=3) avoids stopping at a transient sparse window. SIGINT/SIGTERM aborts via
- * the signal (ADR-047); the persisted cursor makes a partial run resumable.
+ * A source-aware listener may explicitly report `caughtUp` after reaching its current boundary.
+ * Otherwise completion is inferred: the drain stops after `quiescenceTicks` consecutive ticks that
+ * leave the cursor unadvanced (no forward progress) — whether the tick was empty or re-read the same
+ * tip page. A conservative default (K=3) avoids stopping at a transient sparse window. SIGINT/SIGTERM
+ * aborts via the signal (ADR-047); the persisted cursor makes a partial run resumable.
  */
 export async function runOffChainDrain(input: {
   source: SourceContext;
@@ -80,6 +80,10 @@ export async function runOffChainDrain(input: {
     else quiescent = 0;
 
     input.onTick?.({ tick: ticks, items: result.items.length, quiescent });
+
+    // Commit the boundary tick before honoring the hint: a listener may discover its final items on
+    // that tick, and the persisted cursor must remain resumable if the process exits immediately.
+    if (result.caughtUp === true) break;
 
     if (quiescent < options.quiescenceTicks && options.interTickDelayMs > 0) {
       await sleepAbortable(options.interTickDelayMs, signal);
