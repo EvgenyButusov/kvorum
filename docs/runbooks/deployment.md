@@ -172,7 +172,7 @@ cd infra/k8s/overlays/prod && kustomize edit set image "ghcr.io/kvorum/kvorum=$I
 
 The `kustomize edit` is separate because CI does it on the runner, keeping kustomize off the droplet — `deploy.sh` only needs `kubectl`, which k3s ships. The script refuses to run if the overlay does not pin the tag you asked for, so a stale edit cannot silently ship the wrong build.
 
-Useful overrides: `MIGRATE_TIMEOUT` (default `300s`), `ROLLOUT_TIMEOUT` (`180s`), `KUBECONFIG` (`/etc/rancher/k3s/k3s.yaml`).
+Useful overrides: `MIGRATE_TIMEOUT` (default `900s`), `ROLLOUT_TIMEOUT` (`180s`), `KUBECONFIG` (`/etc/rancher/k3s/k3s.yaml`).
 
 ## Rollback
 
