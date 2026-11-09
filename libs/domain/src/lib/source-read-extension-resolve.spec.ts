@@ -11,6 +11,7 @@ import {
   getActorOffchainDelegationsFor,
   getOffchainDiscussionContentFor,
   getProposalExtensionFor,
+  getRelationshipDelegateLeaderboardFor,
   getVoteChoicesFor,
   resolveReadExtension,
 } from './source-read-extension-resolve';
@@ -259,6 +260,31 @@ describe('source-read-extension-resolve', () => {
         getActorOffchainDelegationsFor([aave, compound], 'dao-1', ['0xaa']),
       ).resolves.toEqual([]);
       await expect(getActorOffchainDelegationsFor([], 'dao-1', ['0xaa'])).resolves.toEqual([]);
+    });
+  });
+
+  describe('getRelationshipDelegateLeaderboardFor', () => {
+    it('counts distinct delegator addresses across contributions and ranks before limiting', async () => {
+      const first: SourceReadExtension = {
+        ...offchain,
+        getRelationshipDelegations: () =>
+          Promise.resolve([
+            { delegator_address: '0xAA', delegate_actor_id: 'actor-2' },
+            { delegator_address: '0xbb', delegate_actor_id: 'actor-1' },
+          ]),
+      };
+      const second: SourceReadExtension = {
+        ...compound,
+        getRelationshipDelegations: () =>
+          Promise.resolve([
+            { delegator_address: '0xaa', delegate_actor_id: 'actor-2' },
+            { delegator_address: '0xcc', delegate_actor_id: 'actor-2' },
+          ]),
+      };
+
+      await expect(
+        getRelationshipDelegateLeaderboardFor([first, second], 'dao-1', 1),
+      ).resolves.toEqual([{ actor_id: 'actor-2', delegator_count: 2 }]);
     });
   });
 });

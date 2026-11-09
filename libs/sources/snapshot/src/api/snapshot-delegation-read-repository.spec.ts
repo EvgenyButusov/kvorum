@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveActorCurrentDelegations } from './snapshot-delegation-read-repository';
+import {
+  resolveActorCurrentDelegations,
+  resolveCurrentRelationshipsForSpace,
+} from './snapshot-delegation-read-repository';
 import type { SnapshotDelegation } from '../persistence/schema';
 
 function row(over: Partial<SnapshotDelegation>): SnapshotDelegation {
@@ -100,5 +103,62 @@ describe('resolveActorCurrentDelegations', () => {
     expect(out[0]?.delegate_address).toBe('0xactive');
     expect(out[0]?.weight).toBe('0.7');
     expect(out[0]?.system).toBe('split_delegation');
+  });
+});
+
+describe('resolveCurrentRelationshipsForSpace', () => {
+  it('uses the current space-specific registry delegate instead of the global delegate', () => {
+    const out = resolveCurrentRelationshipsForSpace(
+      [
+        row({ space_id: null, delegate_address: '0xglobal', block_number: '100' }),
+        row({ space_id: 'lido-snapshot.eth', delegate_address: '0xspace', block_number: '90' }),
+      ],
+      'lido-snapshot.eth',
+      NOW,
+    );
+
+    expect(out).toEqual([{ delegator_address: '0xaa', delegate_address: '0xspace' }]);
+  });
+
+  it('falls back to the global registry delegate after a space-specific clear', () => {
+    const out = resolveCurrentRelationshipsForSpace(
+      [
+        row({ space_id: null, delegate_address: '0xglobal', block_number: '100' }),
+        row({ space_id: 'lido-snapshot.eth', delegate_address: '0xspace', block_number: '110' }),
+        row({
+          space_id: 'lido-snapshot.eth',
+          delegate_address: '0x0',
+          event_type: 'clear',
+          block_number: '120',
+        }),
+      ],
+      'lido-snapshot.eth',
+      NOW,
+    );
+
+    expect(out).toEqual([{ delegator_address: '0xaa', delegate_address: '0xglobal' }]);
+  });
+
+  it('adds every active split delegate and excludes expired relationships', () => {
+    const out = resolveCurrentRelationshipsForSpace(
+      [
+        row({
+          delegation_system: 'split_delegation',
+          delegate_address: '0xactive',
+          expires_at: new Date('2026-12-01T00:00:00Z'),
+          block_number: '200',
+        }),
+        row({
+          delegation_system: 'split_delegation',
+          delegate_address: '0xexpired',
+          expires_at: new Date('2026-05-01T00:00:00Z'),
+          block_number: '200',
+        }),
+      ],
+      'lido-snapshot.eth',
+      NOW,
+    );
+
+    expect(out).toEqual([{ delegator_address: '0xaa', delegate_address: '0xactive' }]);
   });
 });

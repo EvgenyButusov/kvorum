@@ -7,10 +7,13 @@ import { formatCompactNumber } from '@/lib/format';
 export function TopDelegates({
   slug,
   delegates,
+  delegationModel = 'power-bearing',
 }: {
   slug: string;
   delegates: DelegateLeaderboardEntry[];
+  delegationModel?: 'power-bearing' | 'relationship-only';
 }) {
+  const isRelationshipOnly = delegationModel === 'relationship-only';
   return (
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-3 border-b border-line-2 pb-2">
@@ -23,7 +26,11 @@ export function TopDelegates({
         </Link>
       </header>
       {delegates.length === 0 ? (
-        <p className="font-mono text-mono-body text-ink-3">No delegate voting power recorded.</p>
+        <p className="font-mono text-mono-body text-ink-3">
+          {isRelationshipOnly
+            ? 'No current Snapshot delegation relationships recorded.'
+            : 'No delegate voting power recorded.'}
+        </p>
       ) : (
         <ol className="flex flex-col">
           {delegates.map((d) => (
@@ -36,10 +43,18 @@ export function TopDelegates({
                 <span className="min-w-0 flex-1 truncate text-ink">
                   {d.displayName ?? `${d.address.slice(0, 6)}…${d.address.slice(-4)}`}
                 </span>
-                <span className="tabular-nums text-ink-3">{d.sharePct}%</span>
-                <span className="tabular-nums text-ink-2">
-                  {formatCompactNumber(d.votingPower)}
-                </span>
+                {isRelationshipOnly ? (
+                  <span className="tabular-nums text-ink-2">
+                    {d.delegatorCount} {d.delegatorCount === 1 ? 'delegator' : 'delegators'}
+                  </span>
+                ) : (
+                  <>
+                    <span className="tabular-nums text-ink-3">{d.sharePct ?? 0}%</span>
+                    <span className="tabular-nums text-ink-2">
+                      {formatCompactNumber(d.votingPower ?? 0)}
+                    </span>
+                  </>
+                )}
               </Link>
             </li>
           ))}

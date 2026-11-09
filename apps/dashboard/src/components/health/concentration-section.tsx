@@ -98,15 +98,15 @@ function Top10Table({
                 <div className="relative h-1.5 w-full bg-bg-3">
                   <div
                     className={cn('absolute inset-y-0 left-0', i === 0 ? 'bg-warn' : 'bg-ink')}
-                    style={{ width: `${Math.round((d.votingPower / maxVp) * 100)}%` }}
+                    style={{ width: `${Math.round(((d.votingPower ?? 0) / maxVp) * 100)}%` }}
                   />
                 </div>
               </td>
               <td className="border-b border-dashed border-line-3 px-3.5 py-2 text-right font-mono tabular-nums text-ink">
-                {formatCompactNumber(d.votingPower)}
+                {formatCompactNumber(d.votingPower ?? 0)}
               </td>
               <td className="w-[60px] border-b border-dashed border-line-3 px-3.5 py-2 text-right font-mono tabular-nums text-ink-2">
-                {d.sharePct.toFixed(1)}%
+                {(d.sharePct ?? 0).toFixed(1)}%
               </td>
             </tr>
           ))}
