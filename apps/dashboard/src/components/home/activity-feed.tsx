@@ -11,7 +11,7 @@ import { useProposalsFeed } from '@/lib/proposals/use-proposals-feed';
 const QUERY = { sort: '-state_updated_at', limit: 15 };
 
 /** Recent activity feed (§6.4 §5): most-recent governance activity, polled every 30s. */
-export function ActivityFeed({ initialItems }: { initialItems: ProposalListItemView[] }) {
+export function ActivityFeed({ initialItems }: { initialItems: ProposalListItemView[] | null }) {
   const feed = useProposalsFeed('activity', QUERY, initialItems);
 
   return (
@@ -27,7 +27,13 @@ export function ActivityFeed({ initialItems }: { initialItems: ProposalListItemV
         />
       }
     >
-      {feed.items.length === 0 ? (
+      {feed.isPending ? (
+        <p className="font-mono text-mono-body text-ink-3">Loading recent activity…</p>
+      ) : feed.isError ? (
+        <p className="font-mono text-mono-body text-ink-3">
+          Recent activity is temporarily unavailable.
+        </p>
+      ) : feed.items.length === 0 ? (
         <p className="font-mono text-mono-body text-ink-3">No recent governance activity.</p>
       ) : (
         <ul>

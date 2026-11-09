@@ -1,6 +1,14 @@
 import { loadDaoDirectory } from './directory';
 
 describe('loadDaoDirectory', () => {
+  it('rejects when the DAO list is unavailable so callers do not cache an empty directory', async () => {
+    const GET = vi.fn().mockResolvedValue({ error: { status: 503 } });
+
+    await expect(loadDaoDirectory({ GET } as never, Date.UTC(2026, 10, 9))).rejects.toThrow(
+      'DAO directory unavailable',
+    );
+  });
+
   it('loads Lido as a publicly available DAO with its governance tracks and metrics', async () => {
     const GET = vi.fn(async (path: string) => {
       switch (path) {

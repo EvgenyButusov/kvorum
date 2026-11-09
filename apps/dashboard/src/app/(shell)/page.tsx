@@ -16,20 +16,17 @@ export const metadata: Metadata = {
   title: 'Kvorum — Governance intelligence for DeFi DAOs',
 };
 
-// Refresh the SSR seed every 30s (ISR), matching the live sections' poll cadence — the page stays
-// cacheable but never serves a badly stale first paint, and the client polls on top.
-export const revalidate = 30;
+// The API is reachable only from the running cluster. Static prerendering runs during the image
+// build, where API failures would otherwise be baked into the first production response as empty
+// data. Render at runtime so every request observes the live API state.
+export const dynamic = 'force-dynamic';
 
 async function loadDaos(): Promise<{ slug: string; name: string }[]> {
-  try {
-    const { data, error } = await serverApi().GET('/v1/daos', {
-      params: { query: { limit: 100 } },
-    });
-    if (error || !data) return [];
-    return data.data.map((d) => ({ slug: d.slug, name: d.name }));
-  } catch {
-    return [];
-  }
+  const { data, error } = await serverApi().GET('/v1/daos', {
+    params: { query: { limit: 100 } },
+  });
+  if (error || !data) throw new Error('DAO directory unavailable');
+  return data.data.map((d) => ({ slug: d.slug, name: d.name }));
 }
 
 async function loadProposals(query: {
@@ -37,29 +34,33 @@ async function loadProposals(query: {
   sort?: string;
   limit?: number;
 }): Promise<ProposalListItemView[]> {
+  const { data, error } = await serverApi().GET('/v1/proposals', { params: { query } });
+  if (error || !data) throw new Error('Proposal feed unavailable');
+  return data.data.map(normalizeListItem);
+}
+
+async function availableOrNull<T>(load: () => Promise<T>): Promise<T | null> {
   try {
-    const { data, error } = await serverApi().GET('/v1/proposals', { params: { query } });
-    if (error || !data) return [];
-    return data.data.map(normalizeListItem);
+    return await load();
   } catch {
-    return [];
+    return null;
   }
 }
 
 export default async function HomePage() {
   const [allDaos, active, recent] = await Promise.all([
-    loadDaos(),
-    loadProposals({ state: 'active', sort: 'voting_ends_at', limit: 12 }),
-    loadProposals({ sort: '-state_updated_at', limit: 15 }),
+    availableOrNull(loadDaos),
+    availableOrNull(() => loadProposals({ state: 'active', sort: 'voting_ends_at', limit: 12 })),
+    availableOrNull(() => loadProposals({ sort: '-state_updated_at', limit: 15 })),
   ]);
-  const daos = allDaos.filter((d) => !COMING_SOON_SLUGS.has(d.slug));
+  const daos = allDaos?.filter((d) => !COMING_SOON_SLUGS.has(d.slug)) ?? null;
 
   return (
     <PageContainer className="flex flex-col gap-12">
-      <StatsBar daoCount={daos.length} />
+      <StatsBar daoCount={daos?.length ?? null} />
       <ActiveProposals initialItems={active} />
       {/* <MismatchFlags /> — deferred until the homepage AI feed lands (issue #608). */}
-      <DaoHealthCards daos={daos} />
+      <DaoHealthCards daos={daos ?? []} />
       <ActivityFeed initialItems={recent} />
     </PageContainer>
   );
