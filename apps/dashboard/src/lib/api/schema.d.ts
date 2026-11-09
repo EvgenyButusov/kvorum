@@ -533,7 +533,7 @@ export interface paths {
     };
     /**
      * Get the delegate leaderboard
-     * @description A DAO's delegates ranked by current voting power, with the number of delegators behind each.
+     * @description A DAO's delegates ranked by current voting power when available, otherwise by the number of current relationship-only delegators.
      */
     get: operations['DaoAnalyticsController_delegateLeaderboard'];
     put?: never;
@@ -1307,19 +1307,21 @@ export interface components {
       _meta: components['schemas']['AnalyticsMetaDto'];
     };
     DelegateLeaderboardRowDto: {
-      /** @description 1-based rank by current received voting power. */
+      /** @description 1-based rank under the response delegation model. */
       rank: number;
       actor_id: string;
       address: string;
       display_name?: Record<string, never> | null;
-      /** @description Current received voting power, base units (UInt256 as string). */
-      voting_power: string;
-      /** @description Share of the DAO-wide delegated voting power, 0..1. */
-      voting_power_share: number;
+      /** @description Current received voting power in base units; null for relationship-only data. */
+      voting_power: string | null;
+      /** @description Share of DAO-wide delegated voting power; null for relationship-only data. */
+      voting_power_share: number | null;
       /** @description Number of addresses currently delegating to this delegate. */
       delegator_count: number;
     };
     DelegateLeaderboardResponseDto: {
+      /** @enum {string} */
+      delegation_model: 'power-bearing' | 'relationship-only';
       data: components['schemas']['DelegateLeaderboardRowDto'][];
       _meta: components['schemas']['AnalyticsMetaDto'];
     };

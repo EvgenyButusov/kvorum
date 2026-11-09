@@ -94,6 +94,19 @@ export interface OffchainDelegationView {
   expires_at: string | null; // ISO seconds
 }
 
+// A current relationship-only delegation edge used to build a delegate directory when the source
+// does not carry voting power. The source resolves the delegate to a canonical actor; the generic
+// read layer counts distinct delegator addresses and ranks those actors without inventing power.
+export interface RelationshipDelegationView {
+  delegator_address: string;
+  delegate_actor_id: string;
+}
+
+export interface RelationshipDelegateLeaderboardView {
+  actor_id: string;
+  delegator_count: number;
+}
+
 // Per-source read extensions spanning proposals, votes, delegations, and dao-source config
 // (ADR-0069, amended 2026-06-17 to lift the proposal-only scope guard). Carried on SourcePlugin
 // and aggregated into the SOURCE_READ_EXTENSIONS collection; dispatched via the pure
@@ -131,4 +144,7 @@ export interface SourceReadExtension {
     daoId: string,
     delegatorAddresses: readonly string[],
   ): Promise<readonly OffchainDelegationView[]>;
+  // Current relationship-only delegation edges for a DAO. Fanned out across extensions; used as a
+  // leaderboard fallback only when no power-bearing delegation rows exist for the DAO.
+  getRelationshipDelegations?(daoId: string): Promise<readonly RelationshipDelegationView[]>;
 }

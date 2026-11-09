@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { DelegationModel } from '@libs/domain';
 import { AnalyticsMetaDto } from './analytics-meta.dto';
 
 export class DelegateLeaderboardQueryDto {
@@ -7,7 +8,7 @@ export class DelegateLeaderboardQueryDto {
 }
 
 export class DelegateLeaderboardRowDto {
-  @ApiProperty({ description: '1-based rank by current received voting power.' })
+  @ApiProperty({ description: '1-based rank under the response delegation model.' })
   declare rank: number;
 
   @ApiProperty()
@@ -19,17 +20,28 @@ export class DelegateLeaderboardRowDto {
   @ApiPropertyOptional({ nullable: true })
   declare display_name: string | null;
 
-  @ApiProperty({ description: 'Current received voting power, base units (UInt256 as string).' })
-  declare voting_power: string;
+  @ApiProperty({
+    description: 'Current received voting power in base units; null for relationship-only data.',
+    nullable: true,
+    type: String,
+  })
+  declare voting_power: string | null;
 
-  @ApiProperty({ description: 'Share of the DAO-wide delegated voting power, 0..1.' })
-  declare voting_power_share: number;
+  @ApiProperty({
+    description: 'Share of DAO-wide delegated voting power; null for relationship-only data.',
+    nullable: true,
+    type: Number,
+  })
+  declare voting_power_share: number | null;
 
   @ApiProperty({ description: 'Number of addresses currently delegating to this delegate.' })
   declare delegator_count: number;
 }
 
 export class DelegateLeaderboardResponseDto {
+  @ApiProperty({ enum: ['power-bearing', 'relationship-only'] })
+  declare delegation_model: DelegationModel;
+
   @ApiProperty({ type: () => [DelegateLeaderboardRowDto] })
   declare data: DelegateLeaderboardRowDto[];
 

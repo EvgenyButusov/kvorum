@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { shareOf, toDelegateLeaderboardRowDto } from './delegate-leaderboard.mappers';
+import {
+  shareOf,
+  toDelegateLeaderboardRowDto,
+  toRelationshipDelegateLeaderboardRowDto,
+} from './delegate-leaderboard.mappers';
 
 describe('shareOf', () => {
   it('computes the fractional share to 4 decimals', () => {
@@ -47,5 +51,24 @@ describe('toDelegateLeaderboardRowDto', () => {
     expect(dto.address).toBe('');
     expect(dto.display_name).toBeNull();
     expect(dto.voting_power_share).toBe(0);
+  });
+});
+
+describe('toRelationshipDelegateLeaderboardRowDto', () => {
+  it('keeps power fields null instead of fabricating voting power', () => {
+    expect(
+      toRelationshipDelegateLeaderboardRowDto({ actor_id: 'a1', delegator_count: 42 }, 1, {
+        primary_address: '0xabc',
+        display_name: 'Delegate',
+      }),
+    ).toEqual({
+      rank: 1,
+      actor_id: 'a1',
+      address: '0xabc',
+      display_name: 'Delegate',
+      voting_power: null,
+      voting_power_share: null,
+      delegator_count: 42,
+    });
   });
 });

@@ -2135,7 +2135,7 @@
     },
     "/v1/daos/{slug}/analytics/delegates": {
       "get": {
-        "description": "A DAO's delegates ranked by current voting power, with the number of delegators behind each.",
+        "description": "A DAO's delegates ranked by current voting power when available, otherwise by the number of current relationship-only delegators.",
         "operationId": "DaoAnalyticsController_delegateLeaderboard",
         "parameters": [
           {
@@ -4879,7 +4879,7 @@
         "properties": {
           "rank": {
             "type": "number",
-            "description": "1-based rank by current received voting power."
+            "description": "1-based rank under the response delegation model."
           },
           "actor_id": {
             "type": "string"
@@ -4893,11 +4893,13 @@
           },
           "voting_power": {
             "type": "string",
-            "description": "Current received voting power, base units (UInt256 as string)."
+            "description": "Current received voting power in base units; null for relationship-only data.",
+            "nullable": true
           },
           "voting_power_share": {
             "type": "number",
-            "description": "Share of the DAO-wide delegated voting power, 0..1."
+            "description": "Share of DAO-wide delegated voting power; null for relationship-only data.",
+            "nullable": true
           },
           "delegator_count": {
             "type": "number",
@@ -4916,6 +4918,10 @@
       "DelegateLeaderboardResponseDto": {
         "type": "object",
         "properties": {
+          "delegation_model": {
+            "type": "string",
+            "enum": ["power-bearing", "relationship-only"]
+          },
           "data": {
             "type": "array",
             "items": {
@@ -4926,7 +4932,7 @@
             "$ref": "#/components/schemas/AnalyticsMetaDto"
           }
         },
-        "required": ["data", "_meta"]
+        "required": ["delegation_model", "data", "_meta"]
       },
       "DelegateAlignmentFocalDto": {
         "type": "object",

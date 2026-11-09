@@ -1,9 +1,11 @@
 import type { Kysely } from 'kysely';
-import { isoSeconds, type PgDatabase } from '@libs/db';
-import type { OffchainDelegationView } from '@libs/domain';
+import { ActorRoutingReadRepository, isoSeconds, type PgDatabase } from '@libs/db';
+import { asSourceConfigObject } from '@libs/domain';
+import type { OffchainDelegationView, RelationshipDelegationView } from '@libs/domain';
 import { DELEGATION_EVENT_TYPE, DELEGATION_SYSTEM } from '../delegation/constants';
 import {
   type CurrentDelegate,
+  resolveCurrentDelegateRegistry,
   resolveCurrentSplit,
 } from '../delegation/snapshot-delegation-repository';
 import type { SnapshotDelegation } from '../persistence/schema';
@@ -14,10 +16,14 @@ import '../persistence/schema';
 // Groups by (delegator, space, system) and resolves the active set per group; Split reuses the
 // projection resolver. Global (dao_id null) Delegate Registry delegations apply to every space.
 export class SnapshotDelegationReadRepository {
+  private readonly identity: ActorRoutingReadRepository;
+
   constructor(
     private readonly db: Kysely<PgDatabase>,
     private readonly now: () => Date = () => new Date(),
-  ) {}
+  ) {
+    this.identity = new ActorRoutingReadRepository(db);
+  }
 
   async findCurrentForActor(
     daoId: string,
@@ -42,6 +48,101 @@ export class SnapshotDelegationReadRepository {
 
     return resolveActorCurrentDelegations(rows, this.now());
   }
+
+  /** Current effective Snapshot relationships for one DAO's space, resolved to delegate actors. */
+  async findCurrentRelationships(daoId: string): Promise<RelationshipDelegationView[]> {
+    const source = await this.db
+      .selectFrom('dao_source')
+      .select('source_config')
+      .where('dao_id', '=', daoId)
+      .where('source_type', '=', 'snapshot')
+      .executeTakeFirst();
+    const space = asSourceConfigObject(source?.source_config)['space'];
+    if (typeof space !== 'string' || space.length === 0) return [];
+
+    const rows = await this.db
+      .selectFrom('snapshot_delegation')
+      .selectAll()
+      .where((eb) =>
+        eb.or([
+          eb('dao_id', '=', daoId),
+          eb.and([
+            eb('dao_id', 'is', null),
+            eb('delegation_system', '=', DELEGATION_SYSTEM.DELEGATE_REGISTRY),
+          ]),
+        ]),
+      )
+      .execute();
+
+    const current = resolveCurrentRelationshipsForSpace(rows, space, this.now());
+    const actorIdByAddress = await this.identity.findCurrentActorIdsByAddresses(
+      current.map((edge) => edge.delegate_address),
+    );
+
+    return current.flatMap((edge) => {
+      const delegateActorId = actorIdByAddress.get(edge.delegate_address) ?? null;
+      return delegateActorId === null
+        ? []
+        : [
+            {
+              delegator_address: edge.delegator_address,
+              delegate_actor_id: delegateActorId,
+            },
+          ];
+    });
+  }
+}
+
+export interface CurrentSnapshotRelationship {
+  delegator_address: string;
+  delegate_address: string;
+}
+
+/** Resolve the relationships that apply to a specific Snapshot space. */
+export function resolveCurrentRelationshipsForSpace(
+  rows: readonly SnapshotDelegation[],
+  space: string,
+  asOf: Date,
+): CurrentSnapshotRelationship[] {
+  const groups = new Map<string, SnapshotDelegation[]>();
+  for (const row of rows) {
+    const key = `${row.delegator_address}|${row.network}`;
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [row]);
+    else group.push(row);
+  }
+
+  const out: CurrentSnapshotRelationship[] = [];
+  for (const group of groups.values()) {
+    const sample = group[0];
+    if (sample === undefined) continue;
+
+    const registry = resolveCurrentDelegateRegistry(
+      group.filter((row) => row.delegation_system === DELEGATION_SYSTEM.DELEGATE_REGISTRY),
+      space,
+    );
+    if (registry !== null) {
+      out.push({
+        delegator_address: sample.delegator_address,
+        delegate_address: registry.delegate_address.toLowerCase(),
+      });
+    }
+
+    const split = resolveCurrentSplit(
+      group.filter(
+        (row) =>
+          row.delegation_system === DELEGATION_SYSTEM.SPLIT_DELEGATION && row.space_id === space,
+      ),
+      asOf,
+    );
+    for (const delegate of split) {
+      out.push({
+        delegator_address: sample.delegator_address,
+        delegate_address: delegate.delegate_address.toLowerCase(),
+      });
+    }
+  }
+  return out;
 }
 
 // Pure: group by (delegator, space, system) and resolve the current active delegate set per group.

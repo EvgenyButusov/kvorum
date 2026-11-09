@@ -24,33 +24,42 @@ export type DelegateLeaderboardEntry = {
   rank: number;
   address: string;
   displayName: string | null;
-  votingPower: number;
+  votingPower: number | null;
   /** Share of the DAO-wide delegated power, as a percentage. */
-  sharePct: number;
+  sharePct: number | null;
   delegatorCount: number;
   href: string;
+};
+
+export type DelegateLeaderboard = {
+  delegationModel: 'power-bearing' | 'relationship-only';
+  entries: DelegateLeaderboardEntry[];
 };
 
 export async function loadDelegateLeaderboard(
   api: Api,
   slug: string,
   limit = 50,
-): Promise<DelegateLeaderboardEntry[]> {
+): Promise<DelegateLeaderboard> {
   try {
     const { data, error } = await api.GET('/v1/daos/{slug}/analytics/delegates', {
       params: { path: { slug }, query: { limit: String(limit) } },
     });
-    if (error || !data) return [];
-    return data.data.map((r) => ({
-      rank: r.rank,
-      address: r.address,
-      displayName: typeof r.display_name === 'string' ? r.display_name : null,
-      votingPower: scalePower(r.voting_power),
-      sharePct: Math.round(r.voting_power_share * 1000) / 10,
-      delegatorCount: r.delegator_count,
-      href: `/daos/${slug}/delegates/${r.address}`,
-    }));
+    if (error || !data) return { delegationModel: 'power-bearing', entries: [] };
+    return {
+      delegationModel: data.delegation_model,
+      entries: data.data.map((r) => ({
+        rank: r.rank,
+        address: r.address,
+        displayName: typeof r.display_name === 'string' ? r.display_name : null,
+        votingPower: r.voting_power === null ? null : scalePower(r.voting_power),
+        sharePct:
+          r.voting_power_share === null ? null : Math.round(r.voting_power_share * 1000) / 10,
+        delegatorCount: r.delegator_count,
+        href: `/daos/${slug}/delegates/${r.address}`,
+      })),
+    };
   } catch {
-    return [];
+    return { delegationModel: 'power-bearing', entries: [] };
   }
 }
