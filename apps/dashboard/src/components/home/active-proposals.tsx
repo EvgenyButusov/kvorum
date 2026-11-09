@@ -10,7 +10,7 @@ import { useProposalsFeed } from '@/lib/proposals/use-proposals-feed';
 const QUERY = { state: 'active', sort: 'voting_ends_at', limit: 12 };
 
 /** Active proposals across all DAOs (§6.4 §2): a horizontal card scroller, polled every 30s. */
-export function ActiveProposals({ initialItems }: { initialItems: ProposalListItemView[] }) {
+export function ActiveProposals({ initialItems }: { initialItems: ProposalListItemView[] | null }) {
   const feed = useProposalsFeed('active', QUERY, initialItems);
 
   return (
@@ -26,7 +26,13 @@ export function ActiveProposals({ initialItems }: { initialItems: ProposalListIt
         />
       }
     >
-      {feed.items.length === 0 ? (
+      {feed.isPending ? (
+        <p className="font-mono text-mono-body text-ink-3">Loading active proposals…</p>
+      ) : feed.isError ? (
+        <p className="font-mono text-mono-body text-ink-3">
+          Active proposals are temporarily unavailable.
+        </p>
+      ) : feed.items.length === 0 ? (
         <p className="font-mono text-mono-body text-ink-3">No proposals are currently active.</p>
       ) : (
         <div className="flex gap-4 overflow-x-auto pb-2">

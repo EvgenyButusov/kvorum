@@ -5,7 +5,7 @@ import { formatCompactNumber } from '@/lib/format';
  * proposals / votes / forum-thread counters need a stats aggregate endpoint (none yet), so they're
  * not shown rather than faked.
  */
-export function StatsBar({ daoCount }: { daoCount: number }) {
+export function StatsBar({ daoCount }: { daoCount: number | null }) {
   return (
     <section className="flex flex-col gap-3.5 border-b border-line pb-7">
       <h1 className="max-w-[18ch] font-mono text-hero font-semibold leading-[1.05] tracking-[-0.01em] text-ink">
@@ -20,7 +20,9 @@ export function StatsBar({ daoCount }: { daoCount: number }) {
       <dl className="mt-1 flex flex-wrap gap-x-10 gap-y-2 font-mono text-caption">
         <div className="flex items-baseline gap-2">
           <dt className="uppercase tracking-[0.04em] text-ink-4">DAOs tracked</dt>
-          <dd className="text-body-lg tabular-nums text-ink">{formatCompactNumber(daoCount)}</dd>
+          <dd className="text-body-lg tabular-nums text-ink">
+            {daoCount === null ? '—' : formatCompactNumber(daoCount)}
+          </dd>
         </div>
       </dl>
     </section>

@@ -52,20 +52,9 @@ async function fetchGovernors(api: Api, slug: string): Promise<string[]> {
  * would replace the fan-out if coverage grows.
  */
 export async function loadDaoDirectory(api: Api, now: number): Promise<DaoDirectoryEntry[]> {
-  let daos: {
-    slug: string;
-    name: string;
-    description: string;
-    website_url: string;
-    forum_url: string;
-  }[];
-  try {
-    const { data, error } = await api.GET('/v1/daos', { params: { query: { limit: 100 } } });
-    if (error || !data) return [];
-    daos = data.data;
-  } catch {
-    return [];
-  }
+  const { data, error } = await api.GET('/v1/daos', { params: { query: { limit: 100 } } });
+  if (error || !data) throw new Error('DAO directory unavailable');
+  const daos = data.data;
 
   const from = rangeFrom('90d', now);
 

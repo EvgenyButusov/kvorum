@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { unstable_cache } from 'next/cache';
 import Link from 'next/link';
 
 import { Crumb } from '@/components/shell/crumb';
@@ -20,12 +21,25 @@ export const metadata: Metadata = {
   alternates: { canonical: '/daos' },
 };
 
-// The directory changes rarely and the per-DAO metrics fan out to several analytics calls; ISR keeps
-// that off the request path.
-export const revalidate = 300;
+// The API is a runtime-only cluster dependency. Avoid baking an unavailable directory into the
+// image during `next build`; the successful-data cache below still keeps the analytics fan-out off
+// the request path for five minutes.
+export const dynamic = 'force-dynamic';
+
+const loadCachedDaoDirectory = unstable_cache(
+  () => loadDaoDirectory(serverApi(), Date.now()),
+  ['dashboard-dao-directory'],
+  { revalidate: 300 },
+);
 
 export default async function DaosPage() {
-  const daos = await loadDaoDirectory(serverApi(), Date.now());
+  let daos: DaoDirectoryEntry[] | null;
+  try {
+    daos = await loadCachedDaoDirectory();
+  } catch {
+    // A rejected cached load is not retained; the next request can recover immediately.
+    daos = null;
+  }
 
   return (
     <>
@@ -39,16 +53,20 @@ export default async function DaosPage() {
               health, and delegates.
             </p>
           </div>
-          {daos.length > 0 && (
+          {daos !== null && daos.length > 0 && (
             <dl className="flex border border-line">
               <Stat label="Tracked" value={String(daos.length)} />
             </dl>
           )}
         </div>
 
-        {daos.length === 0 ? (
+        {daos === null ? (
           <p className="border border-line-3 bg-bg-2 py-10 text-center font-mono text-mono-body text-ink-3">
             The DAO directory is temporarily unavailable.
+          </p>
+        ) : daos.length === 0 ? (
+          <p className="border border-line-3 bg-bg-2 py-10 text-center font-mono text-mono-body text-ink-3">
+            No DAOs are currently tracked.
           </p>
         ) : (
           <div className="border border-line-3 bg-bg-2">

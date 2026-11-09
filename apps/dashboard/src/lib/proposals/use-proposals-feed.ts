@@ -17,6 +17,7 @@ export type ProposalsFeed = {
   items: ProposalListItemView[];
   updatedAt: number;
   isError: boolean;
+  isPending: boolean;
   isPaused: boolean;
 };
 
@@ -28,11 +29,11 @@ export type ProposalsFeed = {
 export function useProposalsFeed(
   key: string,
   query: FeedQuery,
-  initialItems: ProposalListItemView[],
+  initialItems: ProposalListItemView[] | null,
 ): ProposalsFeed {
   const cache = useRef<{ etag: string | null; result: FeedResult }>({
     etag: null,
-    result: { items: initialItems, quota: { fraction: null } },
+    result: { items: initialItems ?? [], quota: { fraction: null } },
   });
 
   const q = useQuery<FeedResult>({
@@ -51,16 +52,19 @@ export function useProposalsFeed(
       cache.current = { etag: response.headers.get('etag'), result };
       return result;
     },
-    initialData: { items: initialItems, quota: { fraction: null } },
+    ...(initialItems === null
+      ? {}
+      : { initialData: { items: initialItems, quota: { fraction: null } } }),
     refetchInterval: (query) =>
       quotaInterval(POLL_INTERVAL_MS.feed, query.state.data?.quota.fraction ?? null),
   });
 
   const fraction = q.data?.quota.fraction ?? null;
   return {
-    items: q.data?.items ?? initialItems,
+    items: q.data?.items ?? initialItems ?? [],
     updatedAt: q.dataUpdatedAt,
     isError: q.isError,
+    isPending: q.isPending,
     isPaused: fraction != null && fraction < 0.1,
   };
 }
