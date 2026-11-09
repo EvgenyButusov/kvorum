@@ -29,6 +29,7 @@ import {
   DualGovernanceStateProjectionApplier,
   EasyTrackArchivePayloadRepository,
   EasyTrackEventRepository,
+  EasyTrackDescriptionEnricher,
   EasyTrackMotionProjectionApplier,
   EasyTrackReconcileRepository,
   LidoAragonVotingActorAddressDeriver,
@@ -232,6 +233,7 @@ const NOOP_PROJECTION_METRICS = {
             etMotionApplier,
           ],
           readExtension: makeLidoReadExtension(pgDb),
+          proposalActionEnrichers: [new EasyTrackDescriptionEnricher()],
         };
       },
       inject: [

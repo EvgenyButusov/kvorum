@@ -50,8 +50,14 @@ function makeWorker(
   actions = makeActions([]),
   decoder: { decode: ReturnType<typeof vi.fn> } = makeDecoder({ kind: 'miss' }),
   pgDb = makePgDb(),
+  enrichers: ConstructorParameters<typeof CalldataDecoderWorkerService>[3] = [],
 ) {
-  return new CalldataDecoderWorkerService(pgDb as never, actions as never, decoder as never);
+  return new CalldataDecoderWorkerService(
+    pgDb as never,
+    actions as never,
+    decoder as never,
+    enrichers,
+  );
 }
 
 beforeEach(() => {
@@ -242,5 +248,44 @@ describe('CalldataDecoderWorkerService', () => {
     await worker.tick();
 
     expect(calldataDecodeMetrics.abiDecodeSuccessRate.record).not.toHaveBeenCalled();
+  });
+
+  it('#11 — refreshes content through the matching source-owned action enricher', async () => {
+    const actions = makeActions();
+    const refreshProposal = vi.fn().mockResolvedValue(undefined);
+    const worker = makeWorker(
+      actions,
+      makeDecoder({
+        kind: 'decoded',
+        decodedFunction: 'transfer(address,uint256)',
+        decodedArguments: {},
+        source: 'bundled_library',
+      }),
+      makePgDb(),
+      [{ sourceTypes: [ROW.source_type], refreshProposal }],
+    );
+
+    await worker.tick();
+
+    expect(refreshProposal).toHaveBeenCalledWith({}, ROW.proposal_id);
+  });
+
+  it('#12 — ignores action enrichers registered for a different source', async () => {
+    const refreshProposal = vi.fn().mockResolvedValue(undefined);
+    const worker = makeWorker(
+      makeActions(),
+      makeDecoder({
+        kind: 'decoded',
+        decodedFunction: 'transfer(address,uint256)',
+        decodedArguments: {},
+        source: 'bundled_library',
+      }),
+      makePgDb(),
+      [{ sourceTypes: ['other_source'], refreshProposal }],
+    );
+
+    await worker.tick();
+
+    expect(refreshProposal).not.toHaveBeenCalled();
   });
 });
