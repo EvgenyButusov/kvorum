@@ -76,8 +76,9 @@ export { BackfillAlreadyStartedError } from './backfill/errors/backfill-already-
 export { BackfillNotResumableError } from './backfill/errors/backfill-not-resumable.error';
 export { DaoSourceNotFoundError } from './backfill/errors/dao-source-not-found.error';
 
+import type { Transaction } from 'kysely';
 import type { HeadListener, LogFilter, EventsListener, LogEvent } from '@libs/chain';
-import type { SourceType } from '@libs/db';
+import type { PgDatabase, SourceType } from '@libs/db';
 import type { ArchiveDerivationRow, OffchainArchiveRow } from '@libs/db';
 import type { ArchiveEventType, SourceReadExtension } from '@libs/domain';
 import type { BackfillRuntime } from './backfill/types';
@@ -184,11 +185,18 @@ export type SourceDeriver =
   | OffchainProjectionDeriver
   | OffchainActorAddressDeriver;
 
+/** Source-owned content refresh triggered after a proposal action's calldata decode changes. */
+export interface ProposalActionEnricher {
+  readonly sourceTypes: readonly string[];
+  refreshProposal(trx: Transaction<PgDatabase>, proposalId: string): Promise<void>;
+}
+
 export interface SourcePlugin {
   readonly name: string;
   readonly ingesters: readonly SourceIngester[];
   readonly derivers: readonly SourceDeriver[];
   readonly readExtension: SourceReadExtension;
+  readonly proposalActionEnrichers?: readonly ProposalActionEnricher[];
 }
 
 export type IngestSpec =
