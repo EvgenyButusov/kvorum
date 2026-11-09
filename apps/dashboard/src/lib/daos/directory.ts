@@ -9,7 +9,7 @@ import { resolveTracks } from '@/lib/dao/tracks';
 
 type Api = ReturnType<typeof createApiClient>;
 
-export const COMING_SOON_SLUGS: ReadonlySet<string> = new Set(['lido']);
+export const COMING_SOON_SLUGS: ReadonlySet<string> = new Set();
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
