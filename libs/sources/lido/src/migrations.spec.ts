@@ -22,6 +22,10 @@ import {
   up as up010,
   down as down010,
 } from '../migrations-postgres/lido_010_easy_track_reconcile_seed';
+import {
+  up as up011,
+  down as down011,
+} from '../migrations-postgres/lido_011_easy_track_descriptions';
 
 describe('lido migrations smoke (mocked db)', () => {
   function makeMockDb() {
@@ -62,6 +66,15 @@ describe('lido migrations smoke (mocked db)', () => {
         .fn()
         .mockReturnValue({ sql: 'SELECT 1', parameters: [], queryId: { queryId: '1' } }),
     };
+    const makeQueryBuilder = () => ({
+      innerJoin: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
+      execute: vi.fn().mockResolvedValue([]),
+      executeTakeFirst: vi.fn().mockResolvedValue(undefined),
+    });
     return {
       getExecutor: vi.fn().mockReturnValue(executor),
       schema: {
@@ -70,6 +83,8 @@ describe('lido migrations smoke (mocked db)', () => {
         dropTable: vi.fn().mockImplementation(() => ({ execute: executeQuery })),
         dropIndex: vi.fn().mockImplementation(() => ({ execute: executeQuery })),
       },
+      selectFrom: vi.fn().mockImplementation(() => makeQueryBuilder()),
+      updateTable: vi.fn().mockImplementation(() => makeQueryBuilder()),
       _executeQuery: executeQuery,
     } as unknown as Kysely<unknown> & { _executeQuery: ReturnType<typeof vi.fn> };
   }
@@ -192,5 +207,17 @@ describe('lido migrations smoke (mocked db)', () => {
     const db = makeMockDb();
     await down010(db);
     expect(db._executeQuery).toHaveBeenCalled();
+  });
+
+  it('lido_011_easy_track_descriptions up scans existing Easy Track proposals', async () => {
+    const db = makeMockDb();
+    await up011(db);
+    expect(db.selectFrom).toHaveBeenCalledWith('proposal as p');
+  });
+
+  it('lido_011_easy_track_descriptions down clears generated descriptions', async () => {
+    const db = makeMockDb();
+    await down011(db);
+    expect(db.updateTable).toHaveBeenCalledWith('proposal');
   });
 });

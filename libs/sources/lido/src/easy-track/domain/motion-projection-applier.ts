@@ -16,6 +16,7 @@ import {
   archiveEventTupleKey,
   type ProjectionDeriver,
 } from '@sources/core';
+import { buildEasyTrackDescription, proposalActionInputsForDescription } from './description';
 import {
   MOTION_TERMINAL_TRANSITIONS,
   type MotionTerminalEvent,
@@ -231,6 +232,11 @@ export class EasyTrackMotionProjectionApplier implements ProjectionDeriver {
       (await this.deps.payloads.findDurationAsOf(row.chain_id, row.block_number)) ??
       String(DEFAULT_MOTION_DURATION_SECONDS);
     const objectionEndsAt = new Date(blockTimestamp.getTime() + Number(durationSeconds) * 1000);
+    const actions = this.decodeMotionActions(payload.motionId, row.chain_id, payload.evmScript);
+    const description = buildEasyTrackDescription({
+      factoryAddress: payload.evmScriptFactory,
+      actions: proposalActionInputsForDescription(actions),
+    });
 
     const projection = projectMotionCreated(payload, {
       sourceType: row.source_type,
@@ -238,6 +244,7 @@ export class EasyTrackMotionProjectionApplier implements ProjectionDeriver {
       blockTimestamp,
       objectionEndsAt,
       confirmedAt: row.received_at,
+      description,
     });
 
     await this.transaction(async (repos) => {
@@ -256,7 +263,7 @@ export class EasyTrackMotionProjectionApplier implements ProjectionDeriver {
 
       if (result.inserted) {
         await repos.motions.insert({ ...projection.meta, proposal_id: result.proposalId! });
-        await this.insertMotionActions(repos, result.proposalId!, row.chain_id, payload.evmScript);
+        if (actions.length > 0) await repos.proposals.insertActions(result.proposalId!, actions);
         this.record(row, 'derived', null);
       } else {
         this.record(row, 'skipped_idempotent', null);
@@ -269,26 +276,23 @@ export class EasyTrackMotionProjectionApplier implements ProjectionDeriver {
   // top-level script (never produced by a real motion — the contract validates) logs and leaves the
   // proposal action-less; a DB write error propagates to fail the row. Inner calls degrade to opaque
   // leaves inside the decoder, so partial/unknown scripts still record every target.
-  private async insertMotionActions(
-    repos: ProjectionRepositories,
-    proposalId: string,
+  private decodeMotionActions(
+    motionId: string,
     chainId: string,
     evmScript: string,
-  ): Promise<void> {
-    let actions: ProposalActionInput[];
+  ): ProposalActionInput[] {
     try {
-      actions = toProposalActions(evmScript, chainId, EASY_TRACK_FORWARDERS);
+      return toProposalActions(evmScript, chainId, EASY_TRACK_FORWARDERS);
     } catch (error) {
       if (error instanceof EvmScriptDecodeError) {
         this.logger.error('easy_track_evmscript_decode_failed', {
-          proposal_id: proposalId,
+          motion_id: motionId,
           reason: error.reason,
         });
-        return;
+        return [];
       }
       throw error;
     }
-    if (actions.length > 0) await repos.proposals.insertActions(proposalId, actions);
   }
 
   private async applyObjected(row: ArchiveDerivationRow, motionId: string): Promise<void> {

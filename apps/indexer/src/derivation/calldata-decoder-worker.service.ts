@@ -5,7 +5,7 @@ import type { Kysely } from 'kysely';
 import type { PgDatabase } from '@libs/db';
 import { ProposalActionRepository } from '@libs/db';
 import { readIntervalMs, readPositiveInt } from '@libs/utils';
-import type { DecodeResult } from '@sources/core';
+import type { DecodeResult, ProposalActionEnricher } from '@sources/core';
 import { CalldataDecoder } from '@sources/core';
 import { calldataDecodeMetrics } from './calldata-decode-metrics';
 
@@ -21,6 +21,7 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
     private readonly pgDb: Kysely<PgDatabase>,
     private readonly actions: ProposalActionRepository,
     private readonly decoder: CalldataDecoder,
+    private readonly enrichers: readonly ProposalActionEnricher[] = [],
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -75,6 +76,7 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
           function: result.decodedFunction,
           arguments: result.decodedArguments,
         });
+        await this.refreshProposal(trx, row.source_type, row.proposal_id);
         calldataDecodeMetrics.outcomes.add(1, { outcome: 'decoded', source: result.source });
         return 'decoded';
       }
@@ -86,6 +88,7 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
           retryAt,
           functionSignatureGuess: result.functionSignatureGuess,
         });
+        await this.refreshProposal(trx, row.source_type, row.proposal_id);
         calldataDecodeMetrics.outcomes.add(1, { outcome: 'partial', source: 'selector_index' });
         return 'partial';
       }
@@ -94,6 +97,15 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
       calldataDecodeMetrics.outcomes.add(1, { outcome: 'miss' });
       return 'miss';
     });
+  }
+
+  private async refreshProposal(
+    trx: Parameters<ProposalActionEnricher['refreshProposal']>[0],
+    sourceType: string,
+    proposalId: string,
+  ): Promise<void> {
+    const enricher = this.enrichers.find((candidate) => candidate.sourceTypes.includes(sourceType));
+    await enricher?.refreshProposal(trx, proposalId);
   }
 }
 

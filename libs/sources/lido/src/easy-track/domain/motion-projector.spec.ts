@@ -7,6 +7,8 @@ import {
 } from './motion-projector';
 import type { MotionCreatedPayload } from './types';
 
+const DESCRIPTION = 'This Easy Track motion executes one verified call.';
+
 const PAYLOAD: MotionCreatedPayload = {
   motionId: '42',
   creator: '0xAbCAbCAbCaBCaBcAbcAbCABcabcAbCAbcABcAbCaB',
@@ -21,6 +23,7 @@ const CTX: MotionCreatedContext = {
   blockTimestamp: new Date('2026-01-01T00:00:00Z'),
   objectionEndsAt: new Date('2026-01-04T00:00:00Z'),
   confirmedAt: new Date('2026-01-01T00:05:00Z'),
+  description: DESCRIPTION,
 };
 
 describe('projectMotionCreated', () => {
@@ -31,8 +34,8 @@ describe('projectMotionCreated', () => {
       source_type: 'easy_track',
       source_id: '42',
       title: 'Easy Track motion #42',
-      description: '',
-      description_hash: createHash('sha256').update('').digest('hex'),
+      description: DESCRIPTION,
+      description_hash: createHash('sha256').update(DESCRIPTION).digest('hex'),
       binding: true,
       voting_starts_at: CTX.blockTimestamp,
       voting_ends_at: CTX.objectionEndsAt,
