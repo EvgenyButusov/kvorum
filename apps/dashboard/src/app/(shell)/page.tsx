@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { unstable_cache } from 'next/cache';
 
 import { ActiveProposals } from '@/components/home/active-proposals';
 import { ActivityFeed } from '@/components/home/activity-feed';
@@ -19,7 +18,7 @@ export const metadata: Metadata = {
 
 // The API is reachable only from the running cluster. Static prerendering runs during the image
 // build, where API failures would otherwise be baked into the first production response as empty
-// data. Render at runtime and cache only successful loader results below.
+// data. Render at runtime so every request observes the live API state.
 export const dynamic = 'force-dynamic';
 
 async function loadDaos(): Promise<{ slug: string; name: string }[]> {
@@ -40,32 +39,19 @@ async function loadProposals(query: {
   return data.data.map(normalizeListItem);
 }
 
-const loadCachedDaos = unstable_cache(loadDaos, ['dashboard-home-daos'], { revalidate: 30 });
-const loadCachedActiveProposals = unstable_cache(
-  () => loadProposals({ state: 'active', sort: 'voting_ends_at', limit: 12 }),
-  ['dashboard-home-active-proposals'],
-  { revalidate: 30 },
-);
-const loadCachedRecentProposals = unstable_cache(
-  () => loadProposals({ sort: '-state_updated_at', limit: 15 }),
-  ['dashboard-home-recent-proposals'],
-  { revalidate: 30 },
-);
-
 async function availableOrNull<T>(load: () => Promise<T>): Promise<T | null> {
   try {
     return await load();
   } catch {
-    // The cached function rejects, so Next does not retain a transient failure as empty data.
     return null;
   }
 }
 
 export default async function HomePage() {
   const [allDaos, active, recent] = await Promise.all([
-    availableOrNull(loadCachedDaos),
-    availableOrNull(loadCachedActiveProposals),
-    availableOrNull(loadCachedRecentProposals),
+    availableOrNull(loadDaos),
+    availableOrNull(() => loadProposals({ state: 'active', sort: 'voting_ends_at', limit: 12 })),
+    availableOrNull(() => loadProposals({ sort: '-state_updated_at', limit: 15 })),
   ]);
   const daos = allDaos?.filter((d) => !COMING_SOON_SLUGS.has(d.slug)) ?? null;
 

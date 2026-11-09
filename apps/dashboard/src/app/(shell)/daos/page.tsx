@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { unstable_cache } from 'next/cache';
 import Link from 'next/link';
 
 import { Crumb } from '@/components/shell/crumb';
@@ -22,22 +21,14 @@ export const metadata: Metadata = {
 };
 
 // The API is a runtime-only cluster dependency. Avoid baking an unavailable directory into the
-// image during `next build`; the successful-data cache below still keeps the analytics fan-out off
-// the request path for five minutes.
+// image during `next build`; each request should observe the live API state.
 export const dynamic = 'force-dynamic';
-
-const loadCachedDaoDirectory = unstable_cache(
-  () => loadDaoDirectory(serverApi(), Date.now()),
-  ['dashboard-dao-directory'],
-  { revalidate: 300 },
-);
 
 export default async function DaosPage() {
   let daos: DaoDirectoryEntry[] | null;
   try {
-    daos = await loadCachedDaoDirectory();
+    daos = await loadDaoDirectory(serverApi(), Date.now());
   } catch {
-    // A rejected cached load is not retained; the next request can recover immediately.
     daos = null;
   }
 
