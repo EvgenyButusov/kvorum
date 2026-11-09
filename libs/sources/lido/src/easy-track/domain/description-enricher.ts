@@ -74,7 +74,6 @@ async function selectDescriptionActions(
   db: Kysely<PgDatabase> | Transaction<PgDatabase>,
   proposalIds: readonly string[],
 ): Promise<(EasyTrackDescriptionAction & { proposalId: string })[]> {
-  if (proposalIds.length === 0) return [];
   const rows = await db
     .selectFrom('proposal_action')
     .select([

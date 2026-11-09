@@ -64,4 +64,55 @@ describe('buildEasyTrackDescription', () => {
       `This Easy Track motion was created through factory \`${FACTORY.toLowerCase()}\`. No executable calls could be decoded from its EVMScript.`,
     );
   });
+
+  it('formats JSON-safe argument values and sanitizes inline code', () => {
+    const description = buildEasyTrackDescription({
+      factoryAddress: FACTORY,
+      actions: [
+        {
+          actionIndex: 0,
+          targetAddress: TARGET,
+          targetChainId: '0x1',
+          valueWei: '0',
+          functionSignature: null,
+          decodedFunction: 'describe(string)',
+          decodedArguments: {
+            bigint: 42n,
+            missing: undefined,
+            nested: { amount: 7n },
+            reference: 'line one`\nline two',
+            symbol: Symbol('reference'),
+          },
+          calldata: '0x12345678',
+        },
+        {
+          actionIndex: 1,
+          targetAddress: TARGET,
+          targetChainId: '0x1',
+          valueWei: '0',
+          functionSignature: null,
+          decodedFunction: 'arrayArguments()',
+          decodedArguments: ['ignored'],
+          calldata: '0x12345678',
+        },
+        {
+          actionIndex: 2,
+          targetAddress: TARGET,
+          targetChainId: '0x1',
+          valueWei: '0',
+          functionSignature: null,
+          decodedFunction: 'scalarArguments()',
+          decodedArguments: 7,
+          calldata: '0x12345678',
+        },
+      ],
+    });
+
+    expect(description).toContain('`bigint`: `42`');
+    expect(description).toContain('`missing`: `undefined`');
+    expect(description).toContain('`nested`: `{"amount":"7"}`');
+    expect(description).toContain("`reference`: `line one' line two`");
+    expect(description).toContain('`symbol`: `Symbol(reference)`');
+    expect(description).not.toContain('`0`: `ignored`');
+  });
 });
