@@ -16,7 +16,7 @@ export function ActivityFeed({ initialItems }: { initialItems: ProposalListItemV
 
   return (
     <Section
-      number="04"
+      number="03"
       title="Recent activity"
       reference={
         <Freshness
