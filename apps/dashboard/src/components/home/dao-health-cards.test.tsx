@@ -14,6 +14,7 @@ describe('DaoHealthCards', () => {
     );
     const links = screen.getAllByRole('link');
     expect(links).toHaveLength(2);
+    expect(screen.getByRole('heading', { name: /^02\s*DAO health$/ })).toBeInTheDocument();
     expect(screen.getByText('Lido').closest('a')).toHaveAttribute('href', '/daos/lido/health');
   });
 

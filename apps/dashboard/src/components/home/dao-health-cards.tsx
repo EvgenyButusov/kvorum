@@ -11,7 +11,7 @@ export function DaoHealthCards({ daos }: { daos: { slug: string; name: string }[
   if (daos.length === 0) return null;
 
   return (
-    <Section number="03" title="DAO health">
+    <Section number="02" title="DAO health">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {daos.map((dao) => (
           <Link
