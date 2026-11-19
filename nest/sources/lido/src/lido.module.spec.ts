@@ -1,11 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SourcePlugin } from '@sources/core';
-import {
-  LIDO_PROPOSAL_ACTION_DECODED_PLUGIN,
-  LIDO_SOURCE_PLUGIN,
-  LidoSourceModule,
-} from './lido.module';
+import { LIDO_SOURCE_PLUGIN, LidoSourceModule } from './lido.module';
 
 vi.mock('@libs/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@libs/db')>();
@@ -108,14 +104,14 @@ describe('LidoSourceModule', () => {
     expect(easyTrack.map((d) => d.kind).sort()).toEqual(['actor-address', 'projection']);
   });
 
-  it('exports the Easy Track decoded-action description plugin separately', async () => {
+  it('contributes the Easy Track decoded-action plugin through the source bundle', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [LidoSourceModule],
     }).compile();
 
-    const plugin = moduleRef.get(LIDO_PROPOSAL_ACTION_DECODED_PLUGIN);
-    expect(plugin.sourceTypes).toEqual(['easy_track']);
-    expect(plugin.onProposalActionDecoded).toBeTypeOf('function');
+    const plugin = moduleRef.get<SourcePlugin>(LIDO_SOURCE_PLUGIN);
+    expect(plugin.decodedActionPlugins?.map((p) => p.sourceTypes)).toEqual([['easy_track']]);
+    expect(plugin.decodedActionPlugins?.[0]?.onProposalActionDecoded).toBeTypeOf('function');
   });
 
   it('M4 readExtension claims all three Lido tracks', async () => {

@@ -51,7 +51,6 @@ import { DbModule } from '@nest/db';
 import { buildDriverMetrics } from '../../reconcile-metrics';
 
 export const LIDO_SOURCE_PLUGIN = 'LIDO_SOURCE_PLUGIN';
-export const LIDO_PROPOSAL_ACTION_DECODED_PLUGIN = 'LIDO_PROPOSAL_ACTION_DECODED_PLUGIN';
 
 const NOOP_PROJECTION_METRICS = {
   batchLookupSeconds: () => undefined,
@@ -73,10 +72,6 @@ const NOOP_PROJECTION_METRICS = {
     ]),
   ],
   providers: [
-    {
-      provide: LIDO_PROPOSAL_ACTION_DECODED_PLUGIN,
-      useFactory: () => new EasyTrackDescriptionPlugin(),
-    },
     {
       provide: LidoAragonVotingArchiveWriter,
       useFactory: (archiveEventRepo: ArchiveEventRepository, dlqRepo: DlqRepository) =>
@@ -238,6 +233,7 @@ const NOOP_PROJECTION_METRICS = {
             etMotionApplier,
           ],
           readExtension: makeLidoReadExtension(pgDb),
+          decodedActionPlugins: [new EasyTrackDescriptionPlugin()],
         };
       },
       inject: [
@@ -254,6 +250,6 @@ const NOOP_PROJECTION_METRICS = {
       ],
     },
   ],
-  exports: [LIDO_SOURCE_PLUGIN, LIDO_PROPOSAL_ACTION_DECODED_PLUGIN],
+  exports: [LIDO_SOURCE_PLUGIN],
 })
 export class LidoSourceModule {}

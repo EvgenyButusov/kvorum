@@ -206,14 +206,12 @@ export interface ProposalActionDecodedPlugin {
   ): Promise<void>;
 }
 
-/** Nest token for the narrow decoded-action plugin registry. */
-export const PROPOSAL_ACTION_DECODED_PLUGINS = 'PROPOSAL_ACTION_DECODED_PLUGINS';
-
 export interface SourcePlugin {
   readonly name: string;
   readonly ingesters: readonly SourceIngester[];
   readonly derivers: readonly SourceDeriver[];
   readonly readExtension: SourceReadExtension;
+  readonly decodedActionPlugins?: readonly ProposalActionDecodedPlugin[];
 }
 
 export type IngestSpec =
