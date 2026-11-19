@@ -25,7 +25,10 @@ NS=kvorum
 # k3s writes its kubeconfig here; override for any other cluster.
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
-MIGRATE_TIMEOUT="${MIGRATE_TIMEOUT:-300s}"
+# A cold application image pull on the single-node host can exceed five minutes. Keep the
+# migration gate long enough for that pull plus the migration itself; failed Jobs are still
+# detected immediately by the parallel Failed-condition wait below.
+MIGRATE_TIMEOUT="${MIGRATE_TIMEOUT:-900s}"
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-180s}"
 
 log() { printf '\n=== %s\n' "$*"; }
