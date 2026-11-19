@@ -18,6 +18,9 @@ export interface PollItem {
 export interface PollResult<TCursor extends JsonValue = JsonValue> {
   items: readonly PollItem[];
   nextCursor: TCursor | null;
+  /** The listener reached the current source boundary. Perpetual live pollers ignore this hint;
+   *  finite drains may stop after durably committing this result. */
+  caughtUp?: boolean;
 }
 
 export interface PollPollContext {

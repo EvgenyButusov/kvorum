@@ -19,7 +19,9 @@ export const revalidate = 300;
 export default async function DaoDelegatesPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const name = daoNameFromSlug(slug);
-  const delegates = await loadDelegateLeaderboard(serverApi(), slug, 50);
+  const leaderboard = await loadDelegateLeaderboard(serverApi(), slug, 50);
+  const delegates = leaderboard.entries;
+  const isRelationshipOnly = leaderboard.delegationModel === 'relationship-only';
 
   return (
     <div className="mx-auto flex w-full max-w-[var(--max-page)] flex-col gap-6 px-4 pb-16 pt-7 md:px-8">
@@ -28,14 +30,17 @@ export default async function DaoDelegatesPage({ params }: { params: Promise<{ s
           {name} delegates
         </h1>
         <p className="max-w-[60ch] text-body-lg text-ink-2">
-          Delegates ranked by current received voting power. Open any row for their scorecard —
-          votes, participation, and alignment.
+          {isRelationshipOnly
+            ? 'Snapshot delegates ranked by the number of current delegators. Open any row for their scorecard — votes, participation, and alignment.'
+            : 'Delegates ranked by current received voting power. Open any row for their scorecard — votes, participation, and alignment.'}
         </p>
       </div>
 
       {delegates.length === 0 ? (
         <p className="border border-line-3 bg-bg-2 py-10 text-center font-mono text-mono-body text-ink-3">
-          No delegate voting power is indexed for {name} yet.
+          {isRelationshipOnly
+            ? `No current Snapshot delegation relationships are indexed for ${name} yet.`
+            : `No delegate voting power is indexed for ${name} yet.`}
         </p>
       ) : (
         <div className="border border-line-3 bg-bg-2">
@@ -44,15 +49,19 @@ export default async function DaoDelegatesPage({ params }: { params: Promise<{ s
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-12 bg-bg text-right">#</TableHead>
                 <TableHead className="bg-bg">Delegate</TableHead>
-                <TableHead className="bg-bg text-right">Voting power</TableHead>
-                <TableHead className="bg-bg text-right">Share</TableHead>
+                {!isRelationshipOnly && (
+                  <>
+                    <TableHead className="bg-bg text-right">Voting power</TableHead>
+                    <TableHead className="bg-bg text-right">Share</TableHead>
+                  </>
+                )}
                 <TableHead className="bg-bg text-right">Delegators</TableHead>
                 <TableHead className="bg-bg" aria-label="Open" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {delegates.map((d) => (
-                <DelegateRow key={d.address} delegate={d} />
+                <DelegateRow key={d.address} delegate={d} isRelationshipOnly={isRelationshipOnly} />
               ))}
             </TableBody>
           </Table>
@@ -62,7 +71,13 @@ export default async function DaoDelegatesPage({ params }: { params: Promise<{ s
   );
 }
 
-function DelegateRow({ delegate }: { delegate: DelegateLeaderboardEntry }) {
+function DelegateRow({
+  delegate,
+  isRelationshipOnly,
+}: {
+  delegate: DelegateLeaderboardEntry;
+  isRelationshipOnly: boolean;
+}) {
   return (
     <TableRow>
       <TableCell className="text-right align-top text-ink-3">{delegate.rank}</TableCell>
@@ -77,12 +92,16 @@ function DelegateRow({ delegate }: { delegate: DelegateLeaderboardEntry }) {
           <div className="font-mono text-pill text-ink-4">{truncateAddress(delegate.address)}</div>
         )}
       </TableCell>
-      <TableCell className="whitespace-nowrap text-right align-top text-ink">
-        {formatCompactNumber(delegate.votingPower)}
-      </TableCell>
-      <TableCell className="whitespace-nowrap text-right align-top text-ink-2">
-        {delegate.sharePct}%
-      </TableCell>
+      {!isRelationshipOnly && (
+        <>
+          <TableCell className="whitespace-nowrap text-right align-top text-ink">
+            {formatCompactNumber(delegate.votingPower ?? 0)}
+          </TableCell>
+          <TableCell className="whitespace-nowrap text-right align-top text-ink-2">
+            {delegate.sharePct ?? 0}%
+          </TableCell>
+        </>
+      )}
       <TableCell className="text-right align-top text-ink-2">{delegate.delegatorCount}</TableCell>
       <TableCell className="text-right align-top">
         <Link

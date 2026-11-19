@@ -18,12 +18,14 @@ const ARCHIVE_ROW: ArchiveDerivationRow = {
 
 function makeSelectChain(returnValue: unknown[]) {
   const execute = vi.fn().mockResolvedValue(returnValue);
+  const executeTakeFirst = vi.fn().mockResolvedValue(returnValue[0]);
   const chain = {
     select: vi.fn(),
     where: vi.fn(),
     orderBy: vi.fn(),
     limit: vi.fn(),
     execute,
+    executeTakeFirst,
   };
   chain.select.mockReturnValue(chain);
   chain.where.mockReturnValue(chain);
@@ -82,6 +84,53 @@ describe('ArchiveDerivationRepository', () => {
 
     expect(update.updateTable).toHaveBeenCalledWith('archive_event');
     expect(update.where).toHaveBeenCalledWith('id', '=', 'row-1');
+  });
+
+  it('checks whether an EVM archive tuple is already derived', async () => {
+    const pgSelect = makeSelectChain([{ derived_at: new Date('2026-01-01T00:00:00Z') }]);
+    const repo = new ArchiveDerivationRepository({ selectFrom: pgSelect.selectFrom } as never);
+
+    await expect(
+      repo.isDerivedByEvmTuple({
+        sourceType: 'dual_governance',
+        chainId: '0x1',
+        txHash: '0xtx',
+        logIndex: 1,
+      }),
+    ).resolves.toBe(true);
+
+    expect(pgSelect.where.mock.calls).toEqual([
+      ['source_type', '=', 'dual_governance'],
+      ['chain_id', '=', '0x1'],
+      ['tx_hash', '=', '0xtx'],
+      ['log_index', '=', 1],
+    ]);
+  });
+
+  it('reports an absent or pending EVM archive tuple as not derived', async () => {
+    const pending = makeSelectChain([{ derived_at: null }]);
+    const absent = makeSelectChain([]);
+
+    await expect(
+      new ArchiveDerivationRepository({
+        selectFrom: pending.selectFrom,
+      } as never).isDerivedByEvmTuple({
+        sourceType: 'dual_governance',
+        chainId: '0x1',
+        txHash: '0xtx',
+        logIndex: 1,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      new ArchiveDerivationRepository({
+        selectFrom: absent.selectFrom,
+      } as never).isDerivedByEvmTuple({
+        sourceType: 'dual_governance',
+        chainId: '0x1',
+        txHash: '0xtx',
+        logIndex: 1,
+      }),
+    ).resolves.toBe(false);
   });
 
   it('increments derivation attempt count', async () => {

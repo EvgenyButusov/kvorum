@@ -17,7 +17,11 @@ import { DualGovernanceStateHistoryRepository } from '../persistence/state-histo
 const DLQ_THRESHOLD = Number(process.env['DG_STATE_PROJECTION_DLQ_THRESHOLD'] ?? '5');
 const DG_STATE_PROJECTION_STAGE = 'dual_governance_state_projection_stage';
 
-export type DualGovernanceStateDerivationOutcome = 'derived' | 'skipped_idempotent' | 'failed';
+export type DualGovernanceStateDerivationOutcome =
+  | 'derived'
+  | 'skipped_idempotent'
+  | 'skipped_reference'
+  | 'failed';
 export type DualGovernanceStateDerivationFailureReason =
   | 'payload_missing'
   | 'decode_error'
@@ -46,7 +50,25 @@ export interface DualGovernanceStateProjectionApplierDeps {
   logger?: Logger;
 }
 
-type StateChangedEvent = Extract<DualGovernanceEvent, { type: 'DualGovernanceStateChanged' }>;
+const STATE_PROJECTION_EVENT_TYPES = [
+  'DualGovernanceStateChanged',
+  'NewSignallingEscrowDeployed',
+  'EscrowMasterCopyDeployed',
+  'ConfigProviderSet',
+  'ProposalsCancellerSet',
+  'CancelAllPendingProposalsExecuted',
+  'CancelAllPendingProposalsSkipped',
+  'ProposerRegistered',
+  'ProposerExecutorSet',
+  'ProposerUnregistered',
+  'EmergencyModeActivated',
+  'EmergencyModeDeactivated',
+] as const;
+
+type StateProjectionEvent = Extract<
+  DualGovernanceEvent,
+  { type: (typeof STATE_PROJECTION_EVENT_TYPES)[number] }
+>;
 
 /**
  * Projects DualGovernanceStateChanged events into the append-only DAO-wide history (ADR-024). One row
@@ -58,7 +80,7 @@ type StateChangedEvent = Extract<DualGovernanceEvent, { type: 'DualGovernanceSta
 export class DualGovernanceStateProjectionApplier implements ProjectionDeriver {
   readonly kind = 'projection' as const;
   readonly sourceTypes = ['dual_governance'] as const;
-  readonly eventTypes = ['DualGovernanceStateChanged'] as const;
+  readonly eventTypes = STATE_PROJECTION_EVENT_TYPES;
 
   private readonly logger: Logger;
   private readonly failures: ArchiveFailureRouter;
@@ -91,9 +113,9 @@ export class DualGovernanceStateProjectionApplier implements ProjectionDeriver {
         continue;
       }
 
-      let event: StateChangedEvent;
+      let event: StateProjectionEvent;
       try {
-        event = parseStateChangedEvent(row.event_type, payload.payload);
+        event = parseStateProjectionEvent(row.event_type, payload.payload);
       } catch (error) {
         await this.fail(row, 'decode_error', error);
         continue;
@@ -107,7 +129,13 @@ export class DualGovernanceStateProjectionApplier implements ProjectionDeriver {
     }
   }
 
-  private async apply(row: ArchiveDerivationRow, event: StateChangedEvent): Promise<void> {
+  private async apply(row: ArchiveDerivationRow, event: StateProjectionEvent): Promise<void> {
+    if (event.type !== 'DualGovernanceStateChanged') {
+      await this.deps.archive.markDerived(row.id);
+      this.record(row, 'skipped_reference', null);
+      return;
+    }
+
     const daoId = await this.deps.daoSources.findDaoIdForSource(row.dao_source_id);
     if (daoId === undefined) throw new Error(`unknown dao_source ${row.dao_source_id}`);
 
@@ -165,12 +193,37 @@ export class DualGovernanceStateProjectionApplier implements ProjectionDeriver {
   }
 }
 
-function parseStateChangedEvent(eventType: string, payloadJson: string): StateChangedEvent {
-  if (eventType !== 'DualGovernanceStateChanged') {
-    throw new Error(`unsupported dual_governance state event_type ${eventType}`);
+function parseStateProjectionEvent(eventType: string, payloadJson: string): StateProjectionEvent {
+  const payload = JSON.parse(payloadJson) as Record<string, unknown>;
+  switch (eventType) {
+    case 'DualGovernanceStateChanged':
+      return {
+        type: 'DualGovernanceStateChanged',
+        payload: payload as unknown as DualGovernanceStateChangedPayload,
+      };
+    case 'NewSignallingEscrowDeployed':
+      return { type: 'NewSignallingEscrowDeployed', payload: payload as never };
+    case 'EscrowMasterCopyDeployed':
+      return { type: 'EscrowMasterCopyDeployed', payload: payload as never };
+    case 'ConfigProviderSet':
+      return { type: 'ConfigProviderSet', payload: payload as never };
+    case 'ProposalsCancellerSet':
+      return { type: 'ProposalsCancellerSet', payload: payload as never };
+    case 'CancelAllPendingProposalsExecuted':
+      return { type: 'CancelAllPendingProposalsExecuted', payload: payload as never };
+    case 'CancelAllPendingProposalsSkipped':
+      return { type: 'CancelAllPendingProposalsSkipped', payload: payload as never };
+    case 'ProposerRegistered':
+      return { type: 'ProposerRegistered', payload: payload as never };
+    case 'ProposerExecutorSet':
+      return { type: 'ProposerExecutorSet', payload: payload as never };
+    case 'ProposerUnregistered':
+      return { type: 'ProposerUnregistered', payload: payload as never };
+    case 'EmergencyModeActivated':
+      return { type: 'EmergencyModeActivated', payload: payload as never };
+    case 'EmergencyModeDeactivated':
+      return { type: 'EmergencyModeDeactivated', payload: payload as never };
+    default:
+      throw new Error(`unsupported dual_governance state event_type ${eventType}`);
   }
-  return {
-    type: 'DualGovernanceStateChanged',
-    payload: JSON.parse(payloadJson) as DualGovernanceStateChangedPayload,
-  };
 }

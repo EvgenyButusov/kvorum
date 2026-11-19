@@ -21,8 +21,9 @@ interface EasyTrackAddressCandidate {
  * `MotionCreated` carries the motion creator (the proposer). The terminal events (`MotionEnacted`,
  * `MotionRejected`, `MotionCanceled`) are id-only, and `MotionObjected`'s objector is not modeled as a
  * participant (no vote/objection rows in v1) — all four return `[]`, which still lets the sweep mark
- * the row resolved so the projection runs. The settings events (`MotionDurationChanged` etc.) are not
- * listed: they are archive-only reference data, read directly from ClickHouse for the duration lookup.
+ * the row resolved so the projection runs. The settings events (`MotionDurationChanged` etc.) are
+ * archive-only reference data, but are listed so the motion applier can drain them as no-ops after
+ * the duration lookup consumes them from ClickHouse.
  */
 export class LidoEasyTrackActorAddressDeriver implements ActorAddressDeriver {
   readonly kind = 'actor-address' as const;
@@ -33,6 +34,10 @@ export class LidoEasyTrackActorAddressDeriver implements ActorAddressDeriver {
     'MotionEnacted',
     'MotionRejected',
     'MotionCanceled',
+    'MotionDurationChanged',
+    'ObjectionsThresholdChanged',
+    'MotionsCountLimitChanged',
+    'EVMScriptExecutorChanged',
   ] as const satisfies readonly ArchiveEventType[];
 
   constructor(private readonly payloads: EasyTrackArchivePayloadRepository) {}

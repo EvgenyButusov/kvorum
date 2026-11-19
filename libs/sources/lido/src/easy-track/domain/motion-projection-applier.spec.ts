@@ -124,6 +124,10 @@ describe('EasyTrackMotionProjectionApplier', () => {
       'MotionEnacted',
       'MotionRejected',
       'MotionCanceled',
+      'MotionDurationChanged',
+      'ObjectionsThresholdChanged',
+      'MotionsCountLimitChanged',
+      'EVMScriptExecutorChanged',
     ]);
   });
 
@@ -301,13 +305,20 @@ describe('EasyTrackMotionProjectionApplier', () => {
     expect(archive.incrementAttemptCount).toHaveBeenCalledWith('archive-1');
   });
 
-  it('fails (decode_error) a row whose event_type is not a motion lifecycle event', async () => {
-    const { applier, metrics } = buildApplier({
-      payloads: [makePayload({ motionDuration: '259200' }, 'MotionDurationChanged')],
+  it.each([
+    ['MotionDurationChanged', { motionDuration: '259200' }],
+    ['ObjectionsThresholdChanged', { newThreshold: '50' }],
+    ['MotionsCountLimitChanged', { newMotionsCountLimit: '12' }],
+    ['EVMScriptExecutorChanged', { evmScriptExecutor: CREATOR }],
+  ] as const)('drains %s as an archive-only reference event', async (eventType, payload) => {
+    const { applier, archive, repos, metrics } = buildApplier({
+      payloads: [makePayload(payload, eventType)],
     });
-    await applier.applyBatch([makeRow({ event_type: 'MotionDurationChanged' })]);
+    await applier.applyBatch([makeRow({ event_type: eventType })]);
+    expect(archive.markDerived).toHaveBeenCalledWith('archive-1');
+    expect(repos.proposals.insertProposal).not.toHaveBeenCalled();
     expect(metrics.processed).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: 'failed', reason: 'decode_error' }),
+      expect.objectContaining({ outcome: 'skipped_reference', reason: null }),
     );
   });
 

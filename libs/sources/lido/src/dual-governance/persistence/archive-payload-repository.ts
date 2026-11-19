@@ -69,4 +69,30 @@ export class DualGovernanceArchivePayloadRepository {
       .orderBy('received_at', 'asc')
       .execute();
   }
+
+  /** Finds the submission that owns a Timelock lifecycle event's proposal id. */
+  async findProposalSubmitted(
+    daoSourceId: string,
+    chainId: string,
+    proposalId: string,
+  ): Promise<DualGovernanceArchivePayloadRow | undefined> {
+    const rows = await this.chDb
+      .selectFrom('archive_event_dual_governance')
+      .select([
+        'chain_id',
+        'tx_hash',
+        'log_index',
+        'block_hash',
+        'event_type',
+        'payload',
+        'received_at',
+      ])
+      .where('dao_source_id', '=', daoSourceId)
+      .where('chain_id', '=', chainId)
+      .where('event_type', '=', 'ProposalSubmitted')
+      .where(sql<boolean>`JSONExtractString(payload, 'id') = ${proposalId}`)
+      .orderBy('received_at', 'asc')
+      .execute();
+    return rows.at(-1);
+  }
 }

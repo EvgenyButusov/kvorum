@@ -59,23 +59,34 @@ export default async function DaoHealthPage({ params }: { params: Promise<{ slug
   const { slug } = await params;
   const from90d = rangeFrom('90d', Date.now());
 
-  const [meta, concentration, passRate, participation, forumActivity, delegates, proposals] =
-    await Promise.all([
-      loadDaoMeta(slug),
-      fetchConcentration(serverApi(), slug, { from: from90d }),
-      fetchPassRate(serverApi(), slug, from90d),
-      fetchParticipation(serverApi(), slug, from90d),
-      fetchForumActivity(serverApi(), slug, from90d),
-      loadDelegateLeaderboard(serverApi(), slug, 50),
-      fetchProposalPage(serverApi(), {
-        slug,
-        filters: { dao: [], state: [] },
-        sort: { field: 'voting_ends_at', dir: 'desc' },
-      }).catch(() => ({ items: [], nextCursor: null })),
-    ]);
+  const [
+    meta,
+    concentration,
+    passRate,
+    participation,
+    forumActivity,
+    delegateLeaderboard,
+    proposals,
+  ] = await Promise.all([
+    loadDaoMeta(slug),
+    fetchConcentration(serverApi(), slug, { from: from90d }),
+    fetchPassRate(serverApi(), slug, from90d),
+    fetchParticipation(serverApi(), slug, from90d),
+    fetchForumActivity(serverApi(), slug, from90d),
+    loadDelegateLeaderboard(serverApi(), slug, 50),
+    fetchProposalPage(serverApi(), {
+      slug,
+      filters: { dao: [], state: [] },
+      sort: { field: 'voting_ends_at', dir: 'desc' },
+    }).catch(() => ({ items: [], nextCursor: null })),
+  ]);
 
+  // Relationship-only delegation has no voting-power concentration. Keep that model out of this
+  // power-specific section instead of interpreting null power as zero.
+  const delegates =
+    delegateLeaderboard.delegationModel === 'power-bearing' ? delegateLeaderboard.entries : [];
   const top10 = delegates.slice(0, 10);
-  const lorenzBars = toLorenzBars(delegates.map((d) => d.sharePct));
+  const lorenzBars = toLorenzBars(delegates.map((d) => d.sharePct ?? 0));
 
   const kpis: HealthKpi[] = [
     {

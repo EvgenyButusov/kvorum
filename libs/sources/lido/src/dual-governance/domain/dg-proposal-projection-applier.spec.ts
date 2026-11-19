@@ -87,11 +87,14 @@ function makeDeps(over: {
   executedRow?: ReturnType<typeof ledgerRow> | undefined;
   cancelled?: ReturnType<typeof ledgerRow>[];
   rageQuitAts?: Date[];
+  submissionRow?: ReturnType<typeof payloadRowFor>;
+  submissionDerived?: boolean;
 }) {
   const row = over.row ?? makeRow();
   const archive = {
     markDerived: vi.fn().mockResolvedValue(undefined),
     incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
+    isDerivedByEvmTuple: vi.fn().mockResolvedValue(over.submissionDerived ?? false),
   };
   const dlq = { insert: vi.fn().mockResolvedValue(undefined) };
   const proposals = {
@@ -137,6 +140,7 @@ function makeDeps(over: {
         .fn()
         .mockResolvedValue(over.payload === undefined ? [] : [payloadRowFor(row, over.payload)]),
       findEventsInTx: vi.fn().mockResolvedValue(over.metaRows ?? []),
+      findProposalSubmitted: vi.fn().mockResolvedValue(over.submissionRow),
     } as never,
     proposals: proposals as never,
     actors: actors as never,
@@ -335,6 +339,51 @@ describe('DualGovernanceProposalProjectionApplier', () => {
     await new DualGovernanceProposalProjectionApplier(deps).applyBatch([
       makeRow({ event_type: 'ProposalScheduled' }),
     ]);
+    expect(archive.markDerived).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ProposalScheduled', SCHEDULED],
+    ['ProposalExecuted', EXECUTED],
+  ] as const)(
+    'skips %s when its terminal submission produced no ledger row',
+    async (eventType, payload) => {
+      const row = makeRow({ event_type: eventType });
+      const submission = payloadRowFor(makeRow(), SUBMITTED);
+      const { deps, archive, metrics } = makeDeps({
+        row,
+        payload,
+        submissionRow: submission,
+        submissionDerived: true,
+      });
+
+      await new DualGovernanceProposalProjectionApplier(deps).applyBatch([row]);
+
+      expect(archive.isDerivedByEvmTuple).toHaveBeenCalledWith({
+        sourceType: 'dual_governance',
+        chainId: submission.chain_id,
+        txHash: submission.tx_hash,
+        logIndex: submission.log_index,
+      });
+      expect(archive.markDerived).toHaveBeenCalledWith('row-x');
+      expect(metrics.processed).toHaveBeenCalledWith(
+        expect.objectContaining({ event_type: eventType, outcome: 'skipped', reason: null }),
+      );
+    },
+  );
+
+  it('keeps a lifecycle event deferred while its submission watermark is pending', async () => {
+    const row = makeRow({ event_type: 'ProposalScheduled' });
+    const { deps, archive } = makeDeps({
+      row,
+      payload: SCHEDULED,
+      submissionRow: payloadRowFor(makeRow(), SUBMITTED),
+      submissionDerived: false,
+    });
+
+    await new DualGovernanceProposalProjectionApplier(deps).applyBatch([row]);
+
+    expect(archive.isDerivedByEvmTuple).toHaveBeenCalled();
     expect(archive.markDerived).not.toHaveBeenCalled();
   });
 

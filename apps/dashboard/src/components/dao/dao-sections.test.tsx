@@ -60,4 +60,11 @@ describe('TopDelegates', () => {
     render(<TopDelegates slug="lido" delegates={[]} />);
     expect(screen.getByText(/No delegate voting power/)).toBeInTheDocument();
   });
+
+  it('renders relationship-only delegates by delegator count', () => {
+    render(<TopDelegates slug="lido" delegates={delegates} delegationModel="relationship-only" />);
+    expect(screen.getByText('42 delegators')).toBeInTheDocument();
+    expect(screen.queryByText('500K')).not.toBeInTheDocument();
+    expect(screen.queryByText('12.5%')).not.toBeInTheDocument();
+  });
 });

@@ -48,4 +48,7 @@ export interface ForumCursor {
   lastReconcileMs: number;
   /** Whether the in-progress sweep is a reconcile pass (ignore `highWater`). */
   reconciling: boolean;
+  /** The last category page was enumerated and only `pending` remains to finish this sweep.
+   *  Optional so cursors persisted before this field was introduced remain valid. */
+  sweepComplete?: boolean;
 }

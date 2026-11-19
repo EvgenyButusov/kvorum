@@ -32,6 +32,7 @@ function initialCursor(): ForumCursor {
     sweepMaxActivity: null,
     lastReconcileMs: 0,
     reconciling: false,
+    sweepComplete: false,
   };
 }
 
@@ -139,7 +140,16 @@ export function makeForumPollListener(
           items.push(toItem(host, thread));
         }
         forumMetrics.threadsCrawled.add(items.length, { forum_host: host });
-        return { items, nextCursor: { ...cur, pending: rest } as unknown as JsonValue };
+        const caughtUp = cur.sweepComplete === true && rest.length === 0;
+        return {
+          items,
+          nextCursor: {
+            ...cur,
+            pending: rest,
+            sweepComplete: !caughtUp && cur.sweepComplete === true,
+          } as unknown as JsonValue,
+          caughtUp,
+        };
       }
 
       // 3. Enumerate one category page.
@@ -169,7 +179,15 @@ export function makeForumPollListener(
         reconcileIntervalMs,
         host,
       );
-      return { items: [], nextCursor: next as unknown as JsonValue };
+      const caughtUp = next.sweepComplete === true && next.pending.length === 0;
+      return {
+        items: [],
+        nextCursor: {
+          ...next,
+          sweepComplete: caughtUp ? false : next.sweepComplete,
+        } as unknown as JsonValue,
+        caughtUp,
+      };
     },
   };
 }
@@ -187,12 +205,12 @@ function advanceEnumeration(
 ): ForumCursor {
   const morePagesInCategory = moreTopicsUrl != null && cur.page >= 0;
   if (morePagesInCategory) {
-    return { ...cur, page: cur.page + 1 };
+    return { ...cur, page: cur.page + 1, sweepComplete: false };
   }
 
   const isLastCategory = cur.categoryIndex >= categoriesLen - 1;
   if (!isLastCategory) {
-    return { ...cur, categoryIndex: cur.categoryIndex + 1, page: 0 };
+    return { ...cur, categoryIndex: cur.categoryIndex + 1, page: 0, sweepComplete: false };
   }
 
   // Sweep complete: promote the high-water mark and reset enumeration for the next sweep.
@@ -211,5 +229,6 @@ function advanceEnumeration(
     sweepMaxActivity: null,
     lastReconcileMs,
     reconciling: nextReconciling,
+    sweepComplete: true,
   };
 }

@@ -22,6 +22,17 @@ describe('LidoDualGovernanceActorAddressDeriver', () => {
       'ProposalExecuted',
       'ProposalsCancelledTill',
       'ProposalSubmittedMeta',
+      'NewSignallingEscrowDeployed',
+      'EscrowMasterCopyDeployed',
+      'ConfigProviderSet',
+      'ProposalsCancellerSet',
+      'CancelAllPendingProposalsExecuted',
+      'CancelAllPendingProposalsSkipped',
+      'ProposerRegistered',
+      'ProposerExecutorSet',
+      'ProposerUnregistered',
+      'EmergencyModeActivated',
+      'EmergencyModeDeactivated',
     ]);
   });
 

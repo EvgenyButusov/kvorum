@@ -178,6 +178,48 @@ describe('makeForumPollListener', () => {
     expect(cur.highWater).toBe('2026-01-05T00:00:00Z');
     expect(cur.categoryIndex).toBe(0);
     expect(cur.page).toBe(0);
+    expect(cur.sweepComplete).toBe(true);
+    expect(r.caughtUp).toBe(false);
+  });
+
+  it('reports caught up only after the final page pending threads are drained', async () => {
+    const { client } = fakeClient({
+      pages: {
+        '9:0': {
+          topics: [topic(11, '2026-01-05T00:00:00Z')],
+          moreTopicsUrl: null,
+        },
+      },
+      threads: { 11: thread(11, '2026-01-05T00:00:00Z') },
+    });
+    const listener = makeForumPollListener(
+      { client, host: HOST, categorySlugs: ['proposals'] },
+      1000,
+    );
+
+    const enumeration = await listener.poll(ctx(), baseCursor({}) as unknown as never);
+    expect(enumeration.caughtUp).toBe(false);
+    expect((enumeration.nextCursor as unknown as ForumCursor).sweepComplete).toBe(true);
+
+    const drain = await listener.poll(ctx(), enumeration.nextCursor);
+    expect(drain.items.map((i) => i.externalId)).toEqual(['topic:11']);
+    expect(drain.caughtUp).toBe(true);
+    expect((drain.nextCursor as unknown as ForumCursor).pending).toEqual([]);
+    expect((drain.nextCursor as unknown as ForumCursor).sweepComplete).toBe(false);
+  });
+
+  it('reports caught up immediately when the final page has no pending threads', async () => {
+    const { client } = fakeClient({
+      pages: { '9:0': { topics: [], moreTopicsUrl: null } },
+    });
+    const listener = makeForumPollListener(
+      { client, host: HOST, categorySlugs: ['proposals'] },
+      1000,
+    );
+
+    const result = await listener.poll(ctx(), baseCursor({ highWater: '2026-01-05T00:00:00Z' }));
+    expect(result.caughtUp).toBe(true);
+    expect((result.nextCursor as unknown as ForumCursor).sweepComplete).toBe(false);
   });
 
   it('a reconcile sweep re-queues topics below the high-water mark', async () => {

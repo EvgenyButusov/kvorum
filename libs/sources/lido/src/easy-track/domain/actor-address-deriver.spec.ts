@@ -13,16 +13,20 @@ function makeDeriver(payloadRows: Array<Record<string, unknown>> = []) {
 }
 
 describe('LidoEasyTrackActorAddressDeriver', () => {
-  it('is an actor-address adapter for easy_track listing the five lifecycle events', () => {
+  it('lists every lifecycle and reference event so each row passes the actor gate', () => {
     const deriver = makeDeriver();
     expect(deriver.kind).toBe('actor-address');
     expect(deriver.sourceTypes).toEqual(['easy_track']);
     expect([...deriver.eventTypes].sort()).toEqual([
+      'EVMScriptExecutorChanged',
       'MotionCanceled',
       'MotionCreated',
+      'MotionDurationChanged',
       'MotionEnacted',
       'MotionObjected',
       'MotionRejected',
+      'MotionsCountLimitChanged',
+      'ObjectionsThresholdChanged',
     ]);
   });
 
