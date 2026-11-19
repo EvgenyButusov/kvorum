@@ -6,6 +6,7 @@ vi.mock('./calldata-decode-metrics', () => ({
     outcomes: { add: vi.fn() },
     tickDurationSeconds: { record: vi.fn() },
     abiDecodeSuccessRate: { record: vi.fn() },
+    decodedActionPluginFailures: { add: vi.fn() },
   },
 }));
 
@@ -323,5 +324,71 @@ describe('CalldataDecoderWorkerService', () => {
         outcome: 'partial',
       },
     );
+  });
+
+  it('#14 — a throwing plugin never rolls back the decode nor blocks the next plugin', async () => {
+    const actions = makeActions();
+    const throwing = vi.fn().mockRejectedValue(new Error('plugin exploded'));
+    const healthy = vi.fn().mockResolvedValue(undefined);
+    const worker = makeWorker(
+      actions,
+      makeDecoder({
+        kind: 'decoded',
+        decodedFunction: 'transfer(address,uint256)',
+        decodedArguments: {},
+        source: 'bundled_library',
+      }),
+      makePgDb(),
+      [
+        { sourceTypes: [ROW.source_type], onProposalActionDecoded: throwing },
+        { sourceTypes: [ROW.source_type], onProposalActionDecoded: healthy },
+      ],
+    );
+
+    await expect(worker.tick()).resolves.toBeUndefined();
+
+    expect(actions.markDecoded).toHaveBeenCalledTimes(1);
+    expect(healthy).toHaveBeenCalledTimes(1);
+    expect(calldataDecodeMetrics.decodedActionPluginFailures.add).toHaveBeenCalledWith(1, {
+      source: ROW.source_type,
+      outcome: 'decoded',
+    });
+    // The tick drained the queue instead of aborting on the failed plugin.
+    expect(actions.findPendingDecodeForUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it('#15 — plugins run outside the decode transaction', async () => {
+    const callOrder: string[] = [];
+    const actions = makeActions();
+    actions.markDecoded.mockImplementation(async () => void callOrder.push('markDecoded'));
+    const pgDb = {
+      transaction: vi.fn().mockReturnValue({
+        execute: vi.fn().mockImplementation((cb: (trx: unknown) => unknown) => cb({})),
+      }),
+    };
+    const worker = makeWorker(
+      actions,
+      makeDecoder({
+        kind: 'decoded',
+        decodedFunction: 'transfer(address,uint256)',
+        decodedArguments: {},
+        source: 'bundled_library',
+      }),
+      pgDb,
+      [
+        {
+          sourceTypes: [ROW.source_type],
+          onProposalActionDecoded: vi.fn().mockImplementation(async () => {
+            callOrder.push('plugin');
+          }),
+        },
+      ],
+    );
+
+    await worker.tick();
+
+    expect(callOrder).toEqual(['markDecoded', 'plugin']);
+    // One transaction for the decode, a separate one for the plugin, then the empty drain query.
+    expect(pgDb.transaction).toHaveBeenCalledTimes(3);
   });
 });

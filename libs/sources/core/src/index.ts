@@ -194,9 +194,9 @@ export interface ProposalActionDecodedEvent {
 }
 
 /**
- * Source-owned reaction to a decoded proposal action. The plugin runs inside the decoder's
- * transaction so its update and the decode commit atomically; throwing leaves the action pending
- * for retry rather than losing the event.
+ * Source-owned reaction to a decoded proposal action, run in its own transaction once the decode has
+ * committed. A throw is logged and metered, never retried: the decode must stay committed, so repair
+ * a missed reaction with the source's own refresh entry point.
  */
 export interface ProposalActionDecodedPlugin {
   readonly sourceTypes: readonly string[];
