@@ -6,6 +6,7 @@ import type {
   OffchainDiscussionContentView,
   OffchainDiscussionLinkView,
   ProposalExtension,
+  RelationshipDelegateLeaderboardView,
   SourceReadExtension,
   VoteChoiceView,
 } from './source-read-extension';
@@ -108,6 +109,33 @@ export async function getActorOffchainDelegationsFor(
     extensions.map((e) => e.getActorOffchainDelegations?.(daoId, delegatorAddresses) ?? []),
   );
   return batches.flat();
+}
+
+// Build a relationship-only delegate leaderboard from every contributing source. Distinct
+// delegator addresses are counted after fan-out so the same relationship cannot be double-counted
+// if two source contributions overlap.
+export async function getRelationshipDelegateLeaderboardFor(
+  extensions: readonly SourceReadExtension[],
+  daoId: string,
+  limit: number,
+): Promise<RelationshipDelegateLeaderboardView[]> {
+  const batches = await Promise.all(
+    extensions.map((e) => e.getRelationshipDelegations?.(daoId) ?? []),
+  );
+  const delegatorsByActor = new Map<string, Set<string>>();
+  for (const edge of batches.flat()) {
+    let delegators = delegatorsByActor.get(edge.delegate_actor_id);
+    if (delegators === undefined) {
+      delegators = new Set<string>();
+      delegatorsByActor.set(edge.delegate_actor_id, delegators);
+    }
+    delegators.add(edge.delegator_address.toLowerCase());
+  }
+
+  return [...delegatorsByActor]
+    .map(([actor_id, delegators]) => ({ actor_id, delegator_count: delegators.size }))
+    .sort((a, b) => b.delegator_count - a.delegator_count || a.actor_id.localeCompare(b.actor_id))
+    .slice(0, limit);
 }
 
 // Coerce a raw source_config into a plain object (helper for source curateSourceConfig impls).

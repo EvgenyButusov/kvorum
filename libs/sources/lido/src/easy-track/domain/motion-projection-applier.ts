@@ -45,20 +45,28 @@ const EASY_TRACK_FORWARDERS = createForwarderRegistry([
   },
 ]);
 
-const MOTION_EVENT_TYPES = [
+const EASY_TRACK_PROJECTION_EVENT_TYPES = [
   'MotionCreated',
   'MotionObjected',
   'MotionEnacted',
   'MotionRejected',
   'MotionCanceled',
+  'MotionDurationChanged',
+  'ObjectionsThresholdChanged',
+  'MotionsCountLimitChanged',
+  'EVMScriptExecutorChanged',
 ] as const;
 
-type MotionLifecycleEvent = Extract<EasyTrackEvent, { type: (typeof MOTION_EVENT_TYPES)[number] }>;
+type EasyTrackProjectionEvent = Extract<
+  EasyTrackEvent,
+  { type: (typeof EASY_TRACK_PROJECTION_EVENT_TYPES)[number] }
+>;
 
 export type EasyTrackMotionOutcome =
   | 'derived'
   | 'skipped_idempotent'
   | 'skipped_state_guard'
+  | 'skipped_reference'
   | 'deferred'
   | 'failed';
 
@@ -110,7 +118,7 @@ interface ProjectionRepositories {
 export class EasyTrackMotionProjectionApplier implements ProjectionDeriver {
   readonly kind = 'projection' as const;
   readonly sourceTypes = ['easy_track'] as const;
-  readonly eventTypes = MOTION_EVENT_TYPES;
+  readonly eventTypes = EASY_TRACK_PROJECTION_EVENT_TYPES;
 
   private readonly logger: Logger;
   private readonly failures: ArchiveFailureRouter;
@@ -149,9 +157,9 @@ export class EasyTrackMotionProjectionApplier implements ProjectionDeriver {
         continue;
       }
 
-      let event: MotionLifecycleEvent;
+      let event: EasyTrackProjectionEvent;
       try {
-        event = parseMotionEvent(row.event_type, payload.payload);
+        event = parseEasyTrackEvent(row.event_type, payload.payload);
       } catch (error) {
         await this.fail(row, 'decode_error', error);
         continue;
@@ -180,7 +188,7 @@ export class EasyTrackMotionProjectionApplier implements ProjectionDeriver {
 
   private async apply(
     row: ArchiveDerivationRow,
-    event: MotionLifecycleEvent,
+    event: EasyTrackProjectionEvent,
     blockTimestamps: Map<string, Date>,
   ): Promise<void> {
     switch (event.type) {
@@ -192,6 +200,13 @@ export class EasyTrackMotionProjectionApplier implements ProjectionDeriver {
       case 'MotionRejected':
       case 'MotionCanceled':
         return this.applyTerminal(row, event.type, event.payload.motionId);
+      case 'MotionDurationChanged':
+      case 'ObjectionsThresholdChanged':
+      case 'MotionsCountLimitChanged':
+      case 'EVMScriptExecutorChanged':
+        await this.deps.archive.markDerived(row.id);
+        this.record(row, 'skipped_reference', null);
+        return;
     }
   }
 
@@ -358,7 +373,7 @@ export class EasyTrackMotionProjectionApplier implements ProjectionDeriver {
   }
 }
 
-function parseMotionEvent(eventType: string, payloadJson: string): MotionLifecycleEvent {
+function parseEasyTrackEvent(eventType: string, payloadJson: string): EasyTrackProjectionEvent {
   const payload = JSON.parse(payloadJson) as Record<string, unknown>;
   switch (eventType) {
     case 'MotionCreated':
@@ -371,6 +386,14 @@ function parseMotionEvent(eventType: string, payloadJson: string): MotionLifecyc
       return { type: 'MotionRejected', payload: payload as never };
     case 'MotionCanceled':
       return { type: 'MotionCanceled', payload: payload as never };
+    case 'MotionDurationChanged':
+      return { type: 'MotionDurationChanged', payload: payload as never };
+    case 'ObjectionsThresholdChanged':
+      return { type: 'ObjectionsThresholdChanged', payload: payload as never };
+    case 'MotionsCountLimitChanged':
+      return { type: 'MotionsCountLimitChanged', payload: payload as never };
+    case 'EVMScriptExecutorChanged':
+      return { type: 'EVMScriptExecutorChanged', payload: payload as never };
     default:
       throw new Error(`unsupported easy track motion event_type ${eventType}`);
   }

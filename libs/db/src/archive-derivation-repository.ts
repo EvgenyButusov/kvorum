@@ -16,6 +16,13 @@ export interface ArchiveDerivationRow {
   derivation_attempt_count: number;
 }
 
+export interface EvmArchiveTuple {
+  sourceType: string;
+  chainId: string;
+  txHash: string;
+  logIndex: number;
+}
+
 /** Off-chain derivation row: identified by external_id, ordered by derivation_ordinal
  *  (no block coords). The off-chain analogue of ArchiveDerivationRow (ADR-071). */
 export interface OffchainArchiveRow {
@@ -113,6 +120,19 @@ export class ArchiveDerivationRepository {
       .set({ derived_at: sql`now()` })
       .where('id', '=', id)
       .execute();
+  }
+
+  /** Returns whether the canonical PG watermark for an archived EVM event is terminal. */
+  async isDerivedByEvmTuple(tuple: EvmArchiveTuple): Promise<boolean> {
+    const row = await this.pgDb
+      .selectFrom('archive_event')
+      .select('derived_at')
+      .where('source_type', '=', tuple.sourceType)
+      .where('chain_id', '=', tuple.chainId)
+      .where('tx_hash', '=', tuple.txHash)
+      .where('log_index', '=', tuple.logIndex)
+      .executeTakeFirst();
+    return row?.derived_at !== null && row?.derived_at !== undefined;
   }
 
   /**

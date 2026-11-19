@@ -11,4 +11,11 @@ describe('StatsBar', () => {
     expect(screen.getByText('DAOs tracked')).toBeInTheDocument();
     expect(screen.getByText('7')).toBeInTheDocument();
   });
+
+  it('does not present an API failure as zero tracked DAOs', () => {
+    render(<StatsBar daoCount={null} />);
+
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.queryByText('0')).not.toBeInTheDocument();
+  });
 });

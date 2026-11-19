@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Res } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Query, Res } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -11,6 +11,12 @@ import {
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { AnalyticsReadRepository, DaoReadRepository } from '@libs/db';
+import {
+  delegationModelFor,
+  getRelationshipDelegateLeaderboardFor,
+  SOURCE_READ_EXTENSIONS,
+  type SourceReadExtension,
+} from '@libs/domain';
 import { toAnalyticsMeta } from './analytics-meta.dto';
 import { estimateBucketCount } from './bucket';
 import { ConcentrationQueryDto, ConcentrationResponseDto } from './concentration.dto';
@@ -23,7 +29,10 @@ import {
   DelegateLeaderboardQueryDto,
   DelegateLeaderboardResponseDto,
 } from './delegate-leaderboard.dto';
-import { toDelegateLeaderboardRowDto } from './delegate-leaderboard.mappers';
+import {
+  toDelegateLeaderboardRowDto,
+  toRelationshipDelegateLeaderboardRowDto,
+} from './delegate-leaderboard.mappers';
 import { DELEGATE_LEADERBOARD_QUERY_SCHEMA } from './delegate-leaderboard.query';
 import { DelegationFlowQueryDto, DelegationFlowResponseDto } from './delegation-flow.dto';
 import {
@@ -55,6 +64,8 @@ export class DaoAnalyticsController {
     private readonly repo: AnalyticsReadRepository,
     private readonly daoRepo: DaoReadRepository,
     private readonly routing: ActorRoutingService,
+    @Inject(SOURCE_READ_EXTENSIONS)
+    private readonly extensions: readonly SourceReadExtension[] = [],
   ) {}
 
   @ApiOperation({
@@ -247,7 +258,7 @@ export class DaoAnalyticsController {
   @ApiOperation({
     summary: 'Get the delegate leaderboard',
     description:
-      "A DAO's delegates ranked by current voting power, with the number of delegators behind each.",
+      "A DAO's delegates ranked by current voting power when available, otherwise by the number of current relationship-only delegators.",
   })
   @Get('delegates')
   @CacheControl({ visibility: 'public', maxAgeSecs: 60, staleWhileRevalidateSecs: 3600 })
@@ -272,12 +283,43 @@ export class DaoAnalyticsController {
       daoId: dao.id,
       limit,
     });
-    const actors = await this.repo.findActors(rows.map((r) => r.actor_id));
+    if (rows.length > 0) {
+      const actors = await this.repo.findActors(rows.map((r) => r.actor_id));
+      const actorById = new Map(actors.map((a) => [a.id, a]));
+
+      return {
+        delegation_model: 'power-bearing',
+        data: rows.map((row, i) =>
+          toDelegateLeaderboardRowDto(row, i + 1, totalVotingPower, actorById.get(row.actor_id)),
+        ),
+        _meta: { confirmed: true, derived_through: null },
+      };
+    }
+
+    const sources = await this.daoRepo.listSourcesForDao(dao.id);
+    const hasRelationshipSource = sources.some(
+      (source) => delegationModelFor(this.extensions, source.source_type) === 'relationship-only',
+    );
+    if (!hasRelationshipSource) {
+      return {
+        delegation_model: 'power-bearing',
+        data: [],
+        _meta: { confirmed: true, derived_through: null },
+      };
+    }
+
+    const relationshipRows = await getRelationshipDelegateLeaderboardFor(
+      this.extensions,
+      dao.id,
+      limit,
+    );
+    const actors = await this.repo.findActors(relationshipRows.map((r) => r.actor_id));
     const actorById = new Map(actors.map((a) => [a.id, a]));
 
     return {
-      data: rows.map((row, i) =>
-        toDelegateLeaderboardRowDto(row, i + 1, totalVotingPower, actorById.get(row.actor_id)),
+      delegation_model: 'relationship-only',
+      data: relationshipRows.map((row, i) =>
+        toRelationshipDelegateLeaderboardRowDto(row, i + 1, actorById.get(row.actor_id)),
       ),
       _meta: { confirmed: true, derived_through: null },
     };

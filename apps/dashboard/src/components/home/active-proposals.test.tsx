@@ -5,9 +5,11 @@ import type { ReactNode } from 'react';
 import { ActiveProposals } from './active-proposals';
 import type { ProposalListItemView } from '@/lib/proposals/list';
 
-vi.mock('@/lib/api/client', () => ({
+const { apiGet } = vi.hoisted(() => ({ apiGet: vi.fn() }));
+
+vi.mock('../../lib/api/client', () => ({
   browserApi: {
-    GET: vi.fn().mockResolvedValue({
+    GET: apiGet.mockResolvedValue({
       data: { data: null },
       response: { status: 304, headers: new Headers() },
     }),
@@ -50,5 +52,16 @@ describe('ActiveProposals', () => {
   it('shows an empty state when nothing is active', () => {
     render(<ActiveProposals initialItems={[]} />, { wrapper });
     expect(screen.getByText(/No proposals are currently active/)).toBeInTheDocument();
+  });
+
+  it('fetches immediately when the server-side seed was unavailable', async () => {
+    apiGet.mockClear();
+    apiGet.mockRejectedValueOnce(new Error('temporary failure'));
+
+    render(<ActiveProposals initialItems={null} />, { wrapper });
+
+    expect(await screen.findByText(/temporarily unavailable/)).toBeInTheDocument();
+    expect(apiGet).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/No proposals are currently active/)).not.toBeInTheDocument();
   });
 });

@@ -72,7 +72,7 @@ export default async function DaoOverviewPage({ params }: { params: Promise<{ sl
   const { slug } = await params;
   const from1y = rangeFrom('1y', Date.now());
 
-  const [dao, active, recent, concentration, passRate, delegates] = await Promise.all([
+  const [dao, active, recent, concentration, passRate, delegateLeaderboard] = await Promise.all([
     loadDao(slug),
     loadProposals(
       slug,
@@ -116,7 +116,11 @@ export default async function DaoOverviewPage({ params }: { params: Promise<{ sl
           top10Pct={concentration.current?.top10Pct ?? null}
           passRatePct={passRate.overallPct}
         />
-        <TopDelegates slug={slug} delegates={delegates} />
+        <TopDelegates
+          slug={slug}
+          delegates={delegateLeaderboard.entries}
+          delegationModel={delegateLeaderboard.delegationModel}
+        />
       </div>
 
       <section className="flex flex-col gap-4">

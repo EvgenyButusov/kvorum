@@ -682,6 +682,7 @@ describe('DaoAnalyticsController', () => {
 
       const out = await controller.delegateLeaderboard('test-dao', { limit: '25' } as never);
       expect(out.data).toHaveLength(2);
+      expect(out.delegation_model).toBe('power-bearing');
       expect(out.data[0]).toMatchObject({
         rank: 1,
         address: '0xaaa',
@@ -690,6 +691,83 @@ describe('DaoAnalyticsController', () => {
         delegator_count: 2,
       });
       expect(out.data[1]).toMatchObject({ rank: 2, address: '', voting_power_share: 0.25 });
+    });
+
+    it('falls back to relationship-only delegations when no power-bearing rows exist', async () => {
+      const repo = makeRepo({
+        findActors: vi
+          .fn()
+          .mockResolvedValue([
+            { id: 'a1', primary_address: '0xdelegate', display_name: 'Delegate' },
+          ]),
+      });
+      const daoRepo = {
+        findDaoBySlug: vi.fn().mockResolvedValue(baseDao),
+        listSourcesForDao: vi
+          .fn()
+          .mockResolvedValue([{ source_type: 'snapshot_delegate_registry', source_config: {} }]),
+      };
+      const extensions = [
+        {
+          sourceTypes: ['snapshot', 'snapshot_delegate_registry'],
+          choiceBounds: vi.fn(),
+          delegationModel: vi.fn().mockReturnValue('relationship-only'),
+          getProposalExtension: vi.fn(),
+          getRelationshipDelegations: vi.fn().mockResolvedValue([
+            { delegator_address: '0xaa', delegate_actor_id: 'a1' },
+            { delegator_address: '0xbb', delegate_actor_id: 'a1' },
+          ]),
+        },
+      ];
+      const controller = new DaoAnalyticsController(
+        repo as never,
+        daoRepo as never,
+        {} as never,
+        extensions as never,
+      );
+
+      const out = await controller.delegateLeaderboard('test-dao', {} as never);
+
+      expect(out).toMatchObject({
+        delegation_model: 'relationship-only',
+        data: [
+          {
+            rank: 1,
+            address: '0xdelegate',
+            voting_power: null,
+            voting_power_share: null,
+            delegator_count: 2,
+          },
+        ],
+      });
+    });
+
+    it('keeps an empty power-bearing model when the DAO has no relationship source', async () => {
+      const daoRepo = {
+        findDaoBySlug: vi.fn().mockResolvedValue(baseDao),
+        listSourcesForDao: vi
+          .fn()
+          .mockResolvedValue([{ source_type: 'compound_governor_bravo', source_config: {} }]),
+      };
+      const extensions = [
+        {
+          sourceTypes: ['compound_governor_bravo'],
+          choiceBounds: vi.fn(),
+          delegationModel: vi.fn().mockReturnValue('power-bearing'),
+          getProposalExtension: vi.fn(),
+        },
+      ];
+      const controller = new DaoAnalyticsController(
+        makeRepo() as never,
+        daoRepo as never,
+        {} as never,
+        extensions as never,
+      );
+
+      await expect(controller.delegateLeaderboard('test-dao', {} as never)).resolves.toMatchObject({
+        delegation_model: 'power-bearing',
+        data: [],
+      });
     });
 
     it('throws not-found when dao is missing', async () => {

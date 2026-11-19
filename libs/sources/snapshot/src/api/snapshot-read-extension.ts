@@ -6,6 +6,7 @@ import type {
   DelegationModel,
   OffchainDelegationView,
   ProposalExtension,
+  RelationshipDelegationView,
   SourceReadExtension,
   VoteChoiceView,
 } from '@libs/domain';
@@ -70,6 +71,9 @@ export function makeSnapshotReadExtension(
       delegatorAddresses: readonly string[],
     ): Promise<readonly OffchainDelegationView[]> {
       return delegationRepo.findCurrentForActor(daoId, delegatorAddresses);
+    },
+    getRelationshipDelegations(daoId: string): Promise<readonly RelationshipDelegationView[]> {
+      return delegationRepo.findCurrentRelationships(daoId);
     },
     curateSourceConfig(sourceType: string, rawConfig: unknown): CuratedDaoSourceConfig {
       // The off-chain `snapshot` source binds by `space`; the delegation registries are on-chain.

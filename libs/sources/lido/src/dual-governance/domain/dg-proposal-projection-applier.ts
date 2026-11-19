@@ -293,10 +293,10 @@ export class DualGovernanceProposalProjectionApplier implements ProjectionDerive
   private async handleScheduled(
     row: ArchiveDerivationRow,
     payload: TimelockProposalIdPayload,
-  ): Promise<'derived' | 'deferred'> {
+  ): Promise<'derived' | 'deferred' | 'skipped'> {
     const daoId = await this.requireDaoId(row);
     const ledgerRow = await this.deps.ledger.markScheduled(daoId, payload.id, row.received_at);
-    if (ledgerRow === undefined) return 'deferred'; // its ProposalSubmitted has not derived yet
+    if (ledgerRow === undefined) return this.resolveMissingSubmission(row, payload.id);
     await this.setUnifiedState(ledgerRow, row.received_at);
     return 'derived';
   }
@@ -304,12 +304,46 @@ export class DualGovernanceProposalProjectionApplier implements ProjectionDerive
   private async handleExecuted(
     row: ArchiveDerivationRow,
     payload: TimelockProposalIdPayload,
-  ): Promise<'derived' | 'deferred'> {
+  ): Promise<'derived' | 'deferred' | 'skipped'> {
     const daoId = await this.requireDaoId(row);
     const ledgerRow = await this.deps.ledger.markExecuted(daoId, payload.id, row.received_at);
-    if (ledgerRow === undefined) return 'deferred';
+    if (ledgerRow === undefined) return this.resolveMissingSubmission(row, payload.id);
     await this.setUnifiedState(ledgerRow, row.received_at);
     return 'derived';
+  }
+
+  /**
+   * A submission can terminate without a ledger row when its immutable transaction has no
+   * ProposalSubmittedMeta. Once that submission's PG watermark is derived, later lifecycle events can
+   * never acquire a ledger row and must terminate too. A missing or still-pending submission remains a
+   * genuine ordering deferral.
+   */
+  private async resolveMissingSubmission(
+    row: ArchiveDerivationRow,
+    proposalId: string,
+  ): Promise<'deferred' | 'skipped'> {
+    const submission = await this.deps.payloads.findProposalSubmitted(
+      row.dao_source_id,
+      row.chain_id,
+      proposalId,
+    );
+    if (submission === undefined) return 'deferred';
+
+    const terminal = await this.deps.archive.isDerivedByEvmTuple({
+      sourceType: row.source_type,
+      chainId: submission.chain_id,
+      txHash: submission.tx_hash,
+      logIndex: submission.log_index,
+    });
+    if (!terminal) return 'deferred';
+
+    this.logger.warn('dg_proposal_lifecycle_skipped_submission_terminal', {
+      dao_source_id: row.dao_source_id,
+      dg_proposal_id: proposalId,
+      event_type: row.event_type,
+      tx_hash: row.tx_hash,
+    });
+    return 'skipped';
   }
 
   private async handleCancelledTill(
