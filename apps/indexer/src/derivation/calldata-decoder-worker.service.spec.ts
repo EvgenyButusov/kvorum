@@ -50,13 +50,13 @@ function makeWorker(
   actions = makeActions([]),
   decoder: { decode: ReturnType<typeof vi.fn> } = makeDecoder({ kind: 'miss' }),
   pgDb = makePgDb(),
-  enrichers: ConstructorParameters<typeof CalldataDecoderWorkerService>[3] = [],
+  decodedActionPlugins: ConstructorParameters<typeof CalldataDecoderWorkerService>[3] = [],
 ) {
   return new CalldataDecoderWorkerService(
     pgDb as never,
     actions as never,
     decoder as never,
-    enrichers,
+    decodedActionPlugins,
   );
 }
 
@@ -250,9 +250,10 @@ describe('CalldataDecoderWorkerService', () => {
     expect(calldataDecodeMetrics.abiDecodeSuccessRate.record).not.toHaveBeenCalled();
   });
 
-  it('#11 — refreshes content through the matching source-owned action enricher', async () => {
+  it('#11 — publishes the affected action to every matching decoded-action plugin', async () => {
     const actions = makeActions();
-    const refreshProposal = vi.fn().mockResolvedValue(undefined);
+    const firstPlugin = vi.fn().mockResolvedValue(undefined);
+    const secondPlugin = vi.fn().mockResolvedValue(undefined);
     const worker = makeWorker(
       actions,
       makeDecoder({
@@ -262,16 +263,26 @@ describe('CalldataDecoderWorkerService', () => {
         source: 'bundled_library',
       }),
       makePgDb(),
-      [{ sourceTypes: [ROW.source_type], refreshProposal }],
+      [
+        { sourceTypes: [ROW.source_type], onProposalActionDecoded: firstPlugin },
+        { sourceTypes: [ROW.source_type], onProposalActionDecoded: secondPlugin },
+      ],
     );
 
     await worker.tick();
 
-    expect(refreshProposal).toHaveBeenCalledWith({}, ROW.proposal_id);
+    const event = {
+      actionId: ROW.id,
+      proposalId: ROW.proposal_id,
+      sourceType: ROW.source_type,
+      outcome: 'decoded',
+    };
+    expect(firstPlugin).toHaveBeenCalledWith({}, event);
+    expect(secondPlugin).toHaveBeenCalledWith({}, event);
   });
 
-  it('#12 — ignores action enrichers registered for a different source', async () => {
-    const refreshProposal = vi.fn().mockResolvedValue(undefined);
+  it('#12 — ignores decoded-action plugins registered for a different source', async () => {
+    const onProposalActionDecoded = vi.fn().mockResolvedValue(undefined);
     const worker = makeWorker(
       makeActions(),
       makeDecoder({
@@ -281,11 +292,36 @@ describe('CalldataDecoderWorkerService', () => {
         source: 'bundled_library',
       }),
       makePgDb(),
-      [{ sourceTypes: ['other_source'], refreshProposal }],
+      [{ sourceTypes: ['other_source'], onProposalActionDecoded }],
     );
 
     await worker.tick();
 
-    expect(refreshProposal).not.toHaveBeenCalled();
+    expect(onProposalActionDecoded).not.toHaveBeenCalled();
+  });
+
+  it('#13 — publishes a targeted event when partial decoding adds a signature guess', async () => {
+    const onProposalActionDecoded = vi.fn().mockResolvedValue(undefined);
+    const worker = makeWorker(
+      makeActions(),
+      makeDecoder({
+        kind: 'partial',
+        functionSignatureGuess: 'transfer(address,uint256)',
+      }),
+      makePgDb(),
+      [{ sourceTypes: [ROW.source_type], onProposalActionDecoded }],
+    );
+
+    await worker.tick();
+
+    expect(onProposalActionDecoded).toHaveBeenCalledWith(
+      {},
+      {
+        actionId: ROW.id,
+        proposalId: ROW.proposal_id,
+        sourceType: ROW.source_type,
+        outcome: 'partial',
+      },
+    );
   });
 });

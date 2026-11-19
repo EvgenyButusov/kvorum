@@ -1,10 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { buildEasyTrackDescription, type EasyTrackDescriptionAction } from './description';
-import {
-  EasyTrackDescriptionEnricher,
-  refreshAllEasyTrackDescriptions,
-} from './description-enricher';
+import { EasyTrackDescriptionPlugin, refreshAllEasyTrackDescriptions } from './description-plugin';
 
 const FACTORY = '0x' + '11'.repeat(20);
 const TARGET = '0x' + '22'.repeat(20);
@@ -71,14 +68,21 @@ function makeDb(input: {
   return { db, selectFrom, updateBuilder, updates };
 }
 
-describe('EasyTrackDescriptionEnricher', () => {
+const decodedEvent = (proposalId: string) => ({
+  actionId: 'action-1',
+  proposalId,
+  sourceType: 'easy_track',
+  outcome: 'decoded' as const,
+});
+
+describe('EasyTrackDescriptionPlugin', () => {
   it('declares Easy Track support and ignores a missing proposal', async () => {
     const { db, selectFrom, updates } = makeDb({});
-    const enricher = new EasyTrackDescriptionEnricher();
+    const plugin = new EasyTrackDescriptionPlugin();
 
-    await enricher.refreshProposal(db as never, 'missing');
+    await plugin.onProposalActionDecoded(db as never, decodedEvent('missing'));
 
-    expect(enricher.sourceTypes).toEqual(['easy_track']);
+    expect(plugin.sourceTypes).toEqual(['easy_track']);
     expect(selectFrom).toHaveBeenCalledTimes(1);
     expect(updates).toEqual([]);
   });
@@ -89,7 +93,10 @@ describe('EasyTrackDescriptionEnricher', () => {
       actions: [action('p-1')],
     });
 
-    await new EasyTrackDescriptionEnricher().refreshProposal(db as never, 'p-1');
+    await new EasyTrackDescriptionPlugin().onProposalActionDecoded(
+      db as never,
+      decodedEvent('p-1'),
+    );
 
     expect(updateBuilder.where).toHaveBeenCalledWith('id', '=', 'p-1');
     expect(updates).toHaveLength(1);
@@ -104,7 +111,10 @@ describe('EasyTrackDescriptionEnricher', () => {
       actions: [action('p-1')],
     });
 
-    await new EasyTrackDescriptionEnricher().refreshProposal(db as never, 'p-1');
+    await new EasyTrackDescriptionPlugin().onProposalActionDecoded(
+      db as never,
+      decodedEvent('p-1'),
+    );
 
     expect(updates).toEqual([]);
   });
@@ -117,14 +127,20 @@ describe('EasyTrackDescriptionEnricher', () => {
       singleProposal: proposal('p-1', description, hash),
       actions,
     });
-    await new EasyTrackDescriptionEnricher().refreshProposal(unchanged.db as never, 'p-1');
+    await new EasyTrackDescriptionPlugin().onProposalActionDecoded(
+      unchanged.db as never,
+      decodedEvent('p-1'),
+    );
     expect(unchanged.updates).toEqual([]);
 
     const stale = makeDb({
       singleProposal: proposal('p-1', description, 'stale'),
       actions,
     });
-    await new EasyTrackDescriptionEnricher().refreshProposal(stale.db as never, 'p-1');
+    await new EasyTrackDescriptionPlugin().onProposalActionDecoded(
+      stale.db as never,
+      decodedEvent('p-1'),
+    );
     expect(stale.updates).toHaveLength(1);
     expect(stale.updates[0]?.['description_hash']).toBe(hash);
   });

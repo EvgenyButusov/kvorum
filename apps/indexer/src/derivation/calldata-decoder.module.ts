@@ -10,17 +10,18 @@ import {
   CalldataDecoder,
   ChainNotReadyError,
   EtherscanClient,
+  PROPOSAL_ACTION_DECODED_PLUGINS,
+  type ProposalActionDecodedPlugin,
   readCalldataDecoderConfig,
 } from '@sources/core';
-import { SOURCE_PLUGINS, type SourcePlugin } from '@sources/core';
 import { ChainContextModule } from '@nest/chain';
 import { toChainLogger } from '@nest/chain';
-import { SourcesModule } from '@nest/sources';
+import { ProposalActionDecodedPluginsModule } from '@nest/sources';
 import { CalldataDecoderWorkerService } from './calldata-decoder-worker.service';
 import { bundledAbisFor, decodeByHeuristic } from './calldata-decoder.helpers';
 
 @Module({
-  imports: [ChainContextModule, SourcesModule],
+  imports: [ChainContextModule, ProposalActionDecodedPluginsModule],
   providers: [
     {
       provide: AbiCacheRepository,
@@ -69,15 +70,9 @@ import { bundledAbisFor, decodeByHeuristic } from './calldata-decoder.helpers';
       useFactory: (
         actions: ProposalActionRepository,
         decoder: CalldataDecoder,
-        plugins: readonly SourcePlugin[],
-      ) =>
-        new CalldataDecoderWorkerService(
-          pgDb,
-          actions,
-          decoder,
-          plugins.flatMap((plugin) => plugin.proposalActionEnrichers ?? []),
-        ),
-      inject: [ProposalActionRepository, CalldataDecoder, SOURCE_PLUGINS],
+        plugins: readonly ProposalActionDecodedPlugin[],
+      ) => new CalldataDecoderWorkerService(pgDb, actions, decoder, plugins),
+      inject: [ProposalActionRepository, CalldataDecoder, PROPOSAL_ACTION_DECODED_PLUGINS],
     },
   ],
 })

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
 import type { PgDatabase } from '@libs/db';
 import { EASY_TRACK_GENERATED_DESCRIPTION_PREFIX } from '../src/easy-track/domain/description';
-import { refreshAllEasyTrackDescriptions } from '../src/easy-track/domain/description-enricher';
+import { refreshAllEasyTrackDescriptions } from '../src/easy-track/domain/description-plugin';
 
 /** Backfill factual descriptions for every Easy Track motion already projected. */
 export async function up(db: Kysely<unknown>): Promise<void> {

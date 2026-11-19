@@ -226,9 +226,9 @@ export type {
   EasyTrackDescriptionInput,
 } from './easy-track/domain/description';
 export {
-  EasyTrackDescriptionEnricher,
+  EasyTrackDescriptionPlugin,
   refreshAllEasyTrackDescriptions,
-} from './easy-track/domain/description-enricher';
+} from './easy-track/domain/description-plugin';
 export {
   projectMotionCreated,
   MOTION_TERMINAL_TRANSITIONS,

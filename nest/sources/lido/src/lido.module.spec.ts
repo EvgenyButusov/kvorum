@@ -1,7 +1,11 @@
 import { Test } from '@nestjs/testing';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SourcePlugin } from '@sources/core';
-import { LIDO_SOURCE_PLUGIN, LidoSourceModule } from './lido.module';
+import {
+  LIDO_PROPOSAL_ACTION_DECODED_PLUGIN,
+  LIDO_SOURCE_PLUGIN,
+  LidoSourceModule,
+} from './lido.module';
 
 vi.mock('@libs/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@libs/db')>();
@@ -102,6 +106,16 @@ describe('LidoSourceModule', () => {
 
     const easyTrack = plugin.derivers.filter((d) => d.sourceTypes.includes('easy_track'));
     expect(easyTrack.map((d) => d.kind).sort()).toEqual(['actor-address', 'projection']);
+  });
+
+  it('exports the Easy Track decoded-action description plugin separately', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [LidoSourceModule],
+    }).compile();
+
+    const plugin = moduleRef.get(LIDO_PROPOSAL_ACTION_DECODED_PLUGIN);
+    expect(plugin.sourceTypes).toEqual(['easy_track']);
+    expect(plugin.onProposalActionDecoded).toBeTypeOf('function');
   });
 
   it('M4 readExtension claims all three Lido tracks', async () => {

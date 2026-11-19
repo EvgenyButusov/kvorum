@@ -185,18 +185,35 @@ export type SourceDeriver =
   | OffchainProjectionDeriver
   | OffchainActorAddressDeriver;
 
-/** Source-owned content refresh triggered after a proposal action's calldata decode changes. */
-export interface ProposalActionEnricher {
-  readonly sourceTypes: readonly string[];
-  refreshProposal(trx: Transaction<PgDatabase>, proposalId: string): Promise<void>;
+/** Narrow event emitted after calldata decoding changes an action's useful content. */
+export interface ProposalActionDecodedEvent {
+  actionId: string;
+  proposalId: string;
+  sourceType: string;
+  outcome: 'decoded' | 'partial';
 }
+
+/**
+ * Source-owned reaction to a decoded proposal action. The plugin runs inside the decoder's
+ * transaction so its update and the decode commit atomically; throwing leaves the action pending
+ * for retry rather than losing the event.
+ */
+export interface ProposalActionDecodedPlugin {
+  readonly sourceTypes: readonly string[];
+  onProposalActionDecoded(
+    trx: Transaction<PgDatabase>,
+    event: ProposalActionDecodedEvent,
+  ): Promise<void>;
+}
+
+/** Nest token for the narrow decoded-action plugin registry. */
+export const PROPOSAL_ACTION_DECODED_PLUGINS = 'PROPOSAL_ACTION_DECODED_PLUGINS';
 
 export interface SourcePlugin {
   readonly name: string;
   readonly ingesters: readonly SourceIngester[];
   readonly derivers: readonly SourceDeriver[];
   readonly readExtension: SourceReadExtension;
-  readonly proposalActionEnrichers?: readonly ProposalActionEnricher[];
 }
 
 export type IngestSpec =

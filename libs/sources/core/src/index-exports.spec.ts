@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   SOURCE_PLUGINS,
+  PROPOSAL_ACTION_DECODED_PLUGINS,
   SOURCE_INGESTERS,
   DERIVATION_APPLIERS,
   ACTOR_SWEEP_ADAPTERS,
@@ -15,6 +16,7 @@ import {
 describe('index barrel exports', () => {
   it('exports injection token constants', () => {
     expect(SOURCE_PLUGINS).toBe('SOURCE_PLUGINS');
+    expect(PROPOSAL_ACTION_DECODED_PLUGINS).toBe('PROPOSAL_ACTION_DECODED_PLUGINS');
     expect(SOURCE_INGESTERS).toBe('SOURCE_INGESTERS');
     expect(DERIVATION_APPLIERS).toBe('DERIVATION_APPLIERS');
     expect(ACTOR_SWEEP_ADAPTERS).toBe('ACTOR_SWEEP_ADAPTERS');

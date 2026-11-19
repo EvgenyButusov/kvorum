@@ -5,7 +5,11 @@ import type { Kysely } from 'kysely';
 import type { PgDatabase } from '@libs/db';
 import { ProposalActionRepository } from '@libs/db';
 import { readIntervalMs, readPositiveInt } from '@libs/utils';
-import type { DecodeResult, ProposalActionEnricher } from '@sources/core';
+import type {
+  DecodeResult,
+  ProposalActionDecodedEvent,
+  ProposalActionDecodedPlugin,
+} from '@sources/core';
 import { CalldataDecoder } from '@sources/core';
 import { calldataDecodeMetrics } from './calldata-decode-metrics';
 
@@ -21,7 +25,7 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
     private readonly pgDb: Kysely<PgDatabase>,
     private readonly actions: ProposalActionRepository,
     private readonly decoder: CalldataDecoder,
-    private readonly enrichers: readonly ProposalActionEnricher[] = [],
+    private readonly decodedActionPlugins: readonly ProposalActionDecodedPlugin[] = [],
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -76,7 +80,12 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
           function: result.decodedFunction,
           arguments: result.decodedArguments,
         });
-        await this.refreshProposal(trx, row.source_type, row.proposal_id);
+        await this.publishDecodedAction(trx, {
+          actionId: row.id,
+          proposalId: row.proposal_id,
+          sourceType: row.source_type,
+          outcome: 'decoded',
+        });
         calldataDecodeMetrics.outcomes.add(1, { outcome: 'decoded', source: result.source });
         return 'decoded';
       }
@@ -88,7 +97,12 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
           retryAt,
           functionSignatureGuess: result.functionSignatureGuess,
         });
-        await this.refreshProposal(trx, row.source_type, row.proposal_id);
+        await this.publishDecodedAction(trx, {
+          actionId: row.id,
+          proposalId: row.proposal_id,
+          sourceType: row.source_type,
+          outcome: 'partial',
+        });
         calldataDecodeMetrics.outcomes.add(1, { outcome: 'partial', source: 'selector_index' });
         return 'partial';
       }
@@ -99,13 +113,15 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
     });
   }
 
-  private async refreshProposal(
-    trx: Parameters<ProposalActionEnricher['refreshProposal']>[0],
-    sourceType: string,
-    proposalId: string,
+  private async publishDecodedAction(
+    trx: Parameters<ProposalActionDecodedPlugin['onProposalActionDecoded']>[0],
+    event: ProposalActionDecodedEvent,
   ): Promise<void> {
-    const enricher = this.enrichers.find((candidate) => candidate.sourceTypes.includes(sourceType));
-    await enricher?.refreshProposal(trx, proposalId);
+    for (const plugin of this.decodedActionPlugins) {
+      if (plugin.sourceTypes.includes(event.sourceType)) {
+        await plugin.onProposalActionDecoded(trx, event);
+      }
+    }
   }
 }
 

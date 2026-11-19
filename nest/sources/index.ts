@@ -1,4 +1,5 @@
 export { SourcesModule } from './sources.module';
+export { ProposalActionDecodedPluginsModule } from './proposal-action-decoded-plugins.module';
 export { SourceApiModule } from './source-api.module';
 export { buildDriverMetrics, stateReconcilerMetrics } from './reconcile-metrics';
 // Re-export the plugin collection token + type so source-blind consumers (apps/api)

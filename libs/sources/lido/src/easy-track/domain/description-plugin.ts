@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { PgDatabase } from '@libs/db';
-import type { ProposalActionEnricher } from '@sources/core';
+import type { ProposalActionDecodedEvent, ProposalActionDecodedPlugin } from '@sources/core';
 import {
   EASY_TRACK_GENERATED_DESCRIPTION_PREFIX,
   buildEasyTrackDescription,
@@ -15,11 +15,14 @@ interface EasyTrackDescriptionProposal {
   descriptionHash: string;
 }
 
-/** Refreshes generated Easy Track descriptions after the generic ABI decoder enriches an action. */
-export class EasyTrackDescriptionEnricher implements ProposalActionEnricher {
+/** Updates the affected Easy Track proposal when one of its actions gains decoded content. */
+export class EasyTrackDescriptionPlugin implements ProposalActionDecodedPlugin {
   readonly sourceTypes = ['easy_track'] as const;
 
-  async refreshProposal(trx: Transaction<PgDatabase>, proposalId: string): Promise<void> {
+  async onProposalActionDecoded(
+    trx: Transaction<PgDatabase>,
+    event: ProposalActionDecodedEvent,
+  ): Promise<void> {
     const proposal = await trx
       .selectFrom('proposal as p')
       .innerJoin('easy_track_motion_meta as m', 'm.proposal_id', 'p.id')
@@ -29,17 +32,17 @@ export class EasyTrackDescriptionEnricher implements ProposalActionEnricher {
         'p.description_hash as descriptionHash',
         'm.factory_address as factoryAddress',
       ])
-      .where('p.id', '=', proposalId)
+      .where('p.id', '=', event.proposalId)
       .where('p.source_type', '=', 'easy_track')
       .executeTakeFirst();
     if (proposal === undefined) return;
 
-    const actions = await selectDescriptionActions(trx, [proposalId]);
+    const actions = await selectDescriptionActions(trx, [event.proposalId]);
     await updateDescription(trx, proposal, actions);
   }
 }
 
-/** Data-migration entry point for repairing descriptions derived before this formatter existed. */
+/** Data-migration entry point for repairing descriptions projected before this formatter existed. */
 export async function refreshAllEasyTrackDescriptions(db: Kysely<PgDatabase>): Promise<void> {
   const proposals = await db
     .selectFrom('proposal as p')
@@ -74,7 +77,7 @@ async function selectDescriptionActions(
   db: Kysely<PgDatabase> | Transaction<PgDatabase>,
   proposalIds: readonly string[],
 ): Promise<(EasyTrackDescriptionAction & { proposalId: string })[]> {
-  const rows = await db
+  return db
     .selectFrom('proposal_action')
     .select([
       'proposal_id as proposalId',
@@ -92,7 +95,6 @@ async function selectDescriptionActions(
     .orderBy('payload_index')
     .orderBy('action_index')
     .execute();
-  return rows;
 }
 
 async function updateDescription(
@@ -121,5 +123,11 @@ async function updateDescription(
       updated_at: sql<Date>`now()`,
     })
     .where('id', '=', proposal.id)
+    .where((eb) =>
+      eb.or([
+        eb('description', '=', ''),
+        eb('description', 'like', `${EASY_TRACK_GENERATED_DESCRIPTION_PREFIX}%`),
+      ]),
+    )
     .execute();
 }
