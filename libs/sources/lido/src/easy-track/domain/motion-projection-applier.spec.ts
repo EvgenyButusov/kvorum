@@ -153,7 +153,6 @@ describe('EasyTrackMotionProjectionApplier', () => {
         binding: true,
         voting_starts_at: new Date(BLOCK_TS_SEC * 1000),
         voting_ends_at: expectedEnds,
-        description: expect.stringContaining('No executable calls could be decoded'),
       }),
     );
     expect(repos.motions.insert).toHaveBeenCalledWith(
@@ -202,11 +201,6 @@ describe('EasyTrackMotionProjectionApplier', () => {
         calldata: '0xabcdef',
       }),
     ]);
-    expect(repos.proposals.insertProposal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        description: expect.stringContaining('raw call'),
-      }),
-    );
   });
 
   it('creates the proposal without actions when the EVMScript is malformed (best-effort)', async () => {

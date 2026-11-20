@@ -217,19 +217,6 @@ export { DEFAULT_MOTION_DURATION_SECONDS } from './easy-track/addresses';
 export { LidoEasyTrackActorAddressDeriver } from './easy-track/domain/actor-address-deriver';
 export { easyTrackMotionTitle } from './easy-track/domain/title-extractor';
 export {
-  EASY_TRACK_GENERATED_DESCRIPTION_PREFIX,
-  buildEasyTrackDescription,
-  proposalActionInputsForDescription,
-} from './easy-track/domain/description';
-export type {
-  EasyTrackDescriptionAction,
-  EasyTrackDescriptionInput,
-} from './easy-track/domain/description';
-export {
-  EasyTrackDescriptionPlugin,
-  refreshAllEasyTrackDescriptions,
-} from './easy-track/domain/description-plugin';
-export {
   projectMotionCreated,
   MOTION_TERMINAL_TRANSITIONS,
 } from './easy-track/domain/motion-projector';

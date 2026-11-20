@@ -76,9 +76,8 @@ export { BackfillAlreadyStartedError } from './backfill/errors/backfill-already-
 export { BackfillNotResumableError } from './backfill/errors/backfill-not-resumable.error';
 export { DaoSourceNotFoundError } from './backfill/errors/dao-source-not-found.error';
 
-import type { Transaction } from 'kysely';
 import type { HeadListener, LogFilter, EventsListener, LogEvent } from '@libs/chain';
-import type { PgDatabase, SourceType } from '@libs/db';
+import type { SourceType } from '@libs/db';
 import type { ArchiveDerivationRow, OffchainArchiveRow } from '@libs/db';
 import type { ArchiveEventType, SourceReadExtension } from '@libs/domain';
 import type { BackfillRuntime } from './backfill/types';
@@ -185,33 +184,11 @@ export type SourceDeriver =
   | OffchainProjectionDeriver
   | OffchainActorAddressDeriver;
 
-/** Narrow event emitted after calldata decoding changes an action's useful content. */
-export interface ProposalActionDecodedEvent {
-  actionId: string;
-  proposalId: string;
-  sourceType: string;
-  outcome: 'decoded' | 'partial';
-}
-
-/**
- * Source-owned reaction to a decoded proposal action, run in its own transaction once the decode has
- * committed. A throw is logged and metered, never retried: the decode must stay committed, so repair
- * a missed reaction with the source's own refresh entry point.
- */
-export interface ProposalActionDecodedPlugin {
-  readonly sourceTypes: readonly string[];
-  onProposalActionDecoded(
-    trx: Transaction<PgDatabase>,
-    event: ProposalActionDecodedEvent,
-  ): Promise<void>;
-}
-
 export interface SourcePlugin {
   readonly name: string;
   readonly ingesters: readonly SourceIngester[];
   readonly derivers: readonly SourceDeriver[];
   readonly readExtension: SourceReadExtension;
-  readonly decodedActionPlugins?: readonly ProposalActionDecodedPlugin[];
 }
 
 export type IngestSpec =

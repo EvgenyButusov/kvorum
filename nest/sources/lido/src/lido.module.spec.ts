@@ -104,16 +104,6 @@ describe('LidoSourceModule', () => {
     expect(easyTrack.map((d) => d.kind).sort()).toEqual(['actor-address', 'projection']);
   });
 
-  it('contributes the Easy Track decoded-action plugin through the source bundle', async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [LidoSourceModule],
-    }).compile();
-
-    const plugin = moduleRef.get<SourcePlugin>(LIDO_SOURCE_PLUGIN);
-    expect(plugin.decodedActionPlugins?.map((p) => p.sourceTypes)).toEqual([['easy_track']]);
-    expect(plugin.decodedActionPlugins?.[0]?.onProposalActionDecoded).toBeTypeOf('function');
-  });
-
   it('M4 readExtension claims all three Lido tracks', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [LidoSourceModule],

@@ -32,6 +32,10 @@ export interface EasyTrackProposalMetadataView extends ProposalSourceMetadata {
   kind: 'easy_track';
   motion_id: string;
   factory_address: string;
+  // null until the factory is in the label registry; the summary then names the address instead.
+  factory_label: string | null;
+  // Derived from the decoded actions, not proposer prose — Easy Track publishes none.
+  action_summary: string;
   objection_ends_at: string;
   state: 'active' | 'enacted' | 'objected' | 'rejected' | 'canceled';
 }

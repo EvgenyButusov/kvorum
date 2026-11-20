@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LidoProposalExtensionReadRepository } from './lido-proposal-extension-read-repository';
 
-function mockPg(row: Record<string, unknown> | undefined) {
+function mockPg(row: Record<string, unknown> | undefined, actions: Record<string, unknown>[] = []) {
   const builder: Record<string, unknown> = {};
-  for (const m of ['selectAll', 'where']) builder[m] = vi.fn(() => builder);
+  for (const m of ['selectAll', 'select', 'where', 'orderBy']) builder[m] = vi.fn(() => builder);
   builder['executeTakeFirst'] = vi.fn().mockResolvedValue(row);
+  builder['execute'] = vi.fn().mockResolvedValue(actions);
   const selectFrom = vi.fn(() => builder);
   return { db: { selectFrom } as never, selectFrom, builder };
 }
@@ -73,26 +74,48 @@ describe('LidoProposalExtensionReadRepository', () => {
     });
   });
 
-  it('maps easy_track motion metadata', async () => {
-    const { db, selectFrom } = mockPg({
-      proposal_id: 'p3',
-      motion_id: '99',
-      factory_address: '0xFACTORY',
-      objection_ends_at: new Date('2026-05-18T10:00:00Z'),
-      state: 'active',
-      last_reconcile_check_block: null,
-    });
+  it('maps easy_track motion metadata and summarises the decoded actions', async () => {
+    const { db, selectFrom } = mockPg(
+      {
+        proposal_id: 'p3',
+        motion_id: '99',
+        factory_address: '0xFACTORY',
+        objection_ends_at: new Date('2026-05-18T10:00:00Z'),
+        state: 'active',
+        last_reconcile_check_block: null,
+      },
+      [
+        {
+          payloadIndex: 0,
+          actionIndex: 0,
+          targetAddress: '0xTARGET',
+          targetChainId: '0x1',
+          valueWei: '0',
+          functionSignature: null,
+          decodedFunction: 'topUp(uint256,string)',
+          decodedArguments: { reference: 'Node operator top-up' },
+          calldata: '0x12345678',
+        },
+      ],
+    );
     const repo = new LidoProposalExtensionReadRepository(db);
 
     const ext = await repo.getExtension('p3', 'easy_track');
     expect(selectFrom).toHaveBeenCalledWith('easy_track_motion_meta');
-    expect(ext?.metadata).toEqual({
+    expect(selectFrom).toHaveBeenCalledWith('proposal_action');
+    expect(ext?.metadata).toMatchObject({
       kind: 'easy_track',
       motion_id: '99',
       factory_address: '0xFACTORY',
+      // No label is registered yet for this factory, so the summary names the address (KNOWN-033).
+      factory_label: null,
       objection_ends_at: '2026-05-18T10:00:00Z',
       state: 'active',
     });
+    const summary = (ext?.metadata as { action_summary: string }).action_summary;
+    expect(summary).toContain('`0xfactory`');
+    expect(summary).toContain('topUp(uint256,string)');
+    expect(summary).toContain('Node operator top-up');
   });
 
   it('returns null when the metadata row is missing', async () => {

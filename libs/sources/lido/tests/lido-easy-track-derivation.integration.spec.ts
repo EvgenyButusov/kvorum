@@ -12,7 +12,6 @@ import {
 } from '@libs/db';
 import {
   EasyTrackArchivePayloadRepository,
-  EasyTrackDescriptionPlugin,
   EasyTrackEventRepository,
   EasyTrackMotionProjectionApplier,
   LidoEasyTrackArchiveWriter,
@@ -212,7 +211,6 @@ describeIf('Lido Easy Track motion derivation integration', () => {
     expect(proposal.state).toBe('active');
     expect(proposal.binding).toBe(true);
     expect(proposal.title).toBe('Easy Track motion #1');
-    expect(proposal.description).toContain('raw call');
     expect(proposal.voting_starts_at).toEqual(new Date(createdAt * 1000));
     expect(proposal.voting_ends_at).toEqual(new Date((createdAt + DURATION) * 1000));
 
@@ -236,38 +234,6 @@ describeIf('Lido Easy Track motion derivation integration', () => {
     expect(actions).toEqual([
       { action_index: 0, target_address: actionTarget, calldata: '0xabcdef' },
     ]);
-    const action = await pgDb
-      .selectFrom('proposal_action')
-      .select('id')
-      .where('proposal_id', '=', proposal.id)
-      .executeTakeFirstOrThrow();
-
-    // The generic calldata worker publishes the affected action to this source-owned plugin after
-    // ABI decoding. It replaces the raw-call fallback without special-casing Lido in the worker.
-    await pgDb.transaction().execute(async (trx) => {
-      await trx
-        .updateTable('proposal_action')
-        .set({
-          decoded_function: 'topUp(uint256,string)',
-          decoded_arguments: { amount: '1000', reference: 'Node operator top-up' },
-          decode_status: 'decoded',
-        })
-        .where('proposal_id', '=', proposal.id)
-        .execute();
-      await new EasyTrackDescriptionPlugin().onProposalActionDecoded(trx, {
-        actionId: action.id,
-        proposalId: proposal.id,
-        sourceType: 'easy_track',
-        outcome: 'decoded',
-      });
-    });
-    const enriched = await pgDb
-      .selectFrom('proposal')
-      .select('description')
-      .where('id', '=', proposal.id)
-      .executeTakeFirstOrThrow();
-    expect(enriched.description).toContain('topUp(uint256,string)');
-    expect(enriched.description).toContain('Node operator top-up');
 
     // The optimistic-objection model writes no per-voter ballots.
     const voteCount = await chDb

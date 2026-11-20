@@ -24,11 +24,6 @@ export const calldataDecodeMetrics = {
     description:
       'Decode attempts where the bundled-library selector bucket had >1 candidate (R8). Audit signal.',
   }),
-  decodedActionPluginFailures: defineCounter({
-    name: 'derivation_decoded_action_plugin_failures',
-    description:
-      'Source-plugin reactions to a decoded action that failed after the decode committed, by source and decode outcome',
-  }),
   etherscanCalls: defineCounter({
     name: 'derivation_calldata_etherscan_calls',
     description: 'Etherscan enrichment calls by outcome (hit/miss/error/skipped)',

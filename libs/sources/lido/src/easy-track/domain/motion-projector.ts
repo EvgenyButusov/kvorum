@@ -24,19 +24,19 @@ export interface MotionCreatedContext {
   objectionEndsAt: Date;
   // Ingestion/derivation clock (archive `received_at`); the audit timestamp for `state_updated_at`.
   confirmedAt: Date;
-  description: string;
 }
 
 /**
  * `MotionCreated` → a unified `proposal` (state `active`, the objection window open) + an
  * `easy_track_motion_meta` row. Binding (motions execute on-chain via the EVMScriptExecutor → Agent).
- * Title is the deterministic placeholder; description factually summarizes the EVMScript actions.
+ * Title is the deterministic placeholder; the description stays empty — Easy Track has no proposer
+ * prose, and the read extension derives a summary from the decoded actions instead.
  */
 export function projectMotionCreated(
   payload: MotionCreatedPayload,
   ctx: MotionCreatedContext,
 ): MotionCreatedProjection {
-  const { description } = ctx;
+  const description = '';
   return {
     creatorAddress: payload.creator.toLowerCase(),
     proposal: {

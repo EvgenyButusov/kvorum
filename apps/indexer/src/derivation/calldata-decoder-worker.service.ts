@@ -5,11 +5,7 @@ import type { Kysely } from 'kysely';
 import type { PgDatabase } from '@libs/db';
 import { ProposalActionRepository } from '@libs/db';
 import { readIntervalMs, readPositiveInt } from '@libs/utils';
-import type {
-  DecodeResult,
-  ProposalActionDecodedEvent,
-  ProposalActionDecodedPlugin,
-} from '@sources/core';
+import type { DecodeResult } from '@sources/core';
 import { CalldataDecoder } from '@sources/core';
 import { calldataDecodeMetrics } from './calldata-decode-metrics';
 
@@ -25,7 +21,6 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
     private readonly pgDb: Kysely<PgDatabase>,
     private readonly actions: ProposalActionRepository,
     private readonly decoder: CalldataDecoder,
-    private readonly decodedActionPlugins: readonly ProposalActionDecodedPlugin[] = [],
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -57,7 +52,7 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
   }
 
   private async processOne(): Promise<'decoded' | 'partial' | 'miss' | null> {
-    const attempt = await this.pgDb.transaction().execute(async (trx) => {
+    return this.pgDb.transaction().execute(async (trx) => {
       const [row] = await this.actions.findPendingDecodeForUpdate(trx, 1);
       if (!row) return null;
 
@@ -81,7 +76,7 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
           arguments: result.decodedArguments,
         });
         calldataDecodeMetrics.outcomes.add(1, { outcome: 'decoded', source: result.source });
-        return { outcome: 'decoded' as const, event: eventFor(row, 'decoded') };
+        return 'decoded';
       }
 
       const retryAt = jitteredRetryAt();
@@ -92,49 +87,14 @@ export class CalldataDecoderWorkerService implements OnApplicationBootstrap {
           functionSignatureGuess: result.functionSignatureGuess,
         });
         calldataDecodeMetrics.outcomes.add(1, { outcome: 'partial', source: 'selector_index' });
-        return { outcome: 'partial' as const, event: eventFor(row, 'partial') };
+        return 'partial';
       }
 
       await this.actions.markUndecodable(trx, row.id, { retryAt });
       calldataDecodeMetrics.outcomes.add(1, { outcome: 'miss' });
-      return { outcome: 'miss' as const, event: null };
+      return 'miss';
     });
-
-    if (attempt === null) return null;
-    if (attempt.event !== null) await this.publishDecodedAction(attempt.event);
-    return attempt.outcome;
   }
-
-  // Each plugin gets its own transaction, after the decode has committed. Never inside the decode
-  // transaction: a plugin failure would roll back `markDecoded`/`markUndecodable` without advancing
-  // `decode_attempt_count`, and the queue's `created_at ASC` head would re-select the same action on
-  // every tick forever, starving every other pending row.
-  private async publishDecodedAction(event: ProposalActionDecodedEvent): Promise<void> {
-    for (const plugin of this.decodedActionPlugins) {
-      if (!plugin.sourceTypes.includes(event.sourceType)) continue;
-      try {
-        await this.pgDb.transaction().execute((trx) => plugin.onProposalActionDecoded(trx, event));
-      } catch (err) {
-        this.logger.error('decoded_action_plugin_failed', { err, actionId: event.actionId });
-        calldataDecodeMetrics.decodedActionPluginFailures.add(1, {
-          source: event.sourceType,
-          outcome: event.outcome,
-        });
-      }
-    }
-  }
-}
-
-function eventFor(
-  row: { id: string; proposal_id: string; source_type: string },
-  outcome: ProposalActionDecodedEvent['outcome'],
-): ProposalActionDecodedEvent {
-  return {
-    actionId: row.id,
-    proposalId: row.proposal_id,
-    sourceType: row.source_type,
-    outcome,
-  };
 }
 
 function jitteredRetryAt(): Date {
