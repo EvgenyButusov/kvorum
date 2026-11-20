@@ -27,7 +27,7 @@ Per-source title extraction, applied at proposal-ingestion time and stored in `p
 | `aragon_voting`           | `metadata.title` if present; else first non-empty line of `metadata.description` with the same `#`-stripping; else NULL.                                                                                |
 | `snapshot`                | The Snapshot API's `title` field, taken as-is, truncated to 200 chars with `…` if longer.                                                                                                               |
 | `dual_governance`         | The originating Aragon proposal's title, looked up via the DG state's link to the affected Aragon proposal. NULL if no Aragon proposal is linked.                                                       |
-| `lido_easy_track`         | `{factory type label} #{motionId}` from the motion's `_evmScriptFactory`; the bare placeholder `Easy Track motion #{motionId}` when that factory has no label. Motions carry no proposer prose at all.  |
+| `easy_track`              | `{factory type label} #{motionId}` from the motion's `_evmScriptFactory`; the bare placeholder `Easy Track motion #{motionId}` when that factory has no label. Motions carry no proposer prose at all.  |
 
 The extractors are small unit-tested functions in source-local implementations:
 

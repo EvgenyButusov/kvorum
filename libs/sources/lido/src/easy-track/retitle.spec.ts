@@ -21,6 +21,7 @@ function mockDb(rows: Record<string, unknown>[]) {
       updateTable: vi.fn(() => update),
     } as never,
     set,
+    select,
   };
 }
 
@@ -30,10 +31,7 @@ describe('retitleEasyTrackMotions', () => {
       { id: 'p1', source_id: '7', title: 'Easy Track motion #7', factory_address: LABELLED },
     ]);
 
-    const result = await retitleEasyTrackMotions(db, {
-      sourceType: 'lido_easy_track',
-      dryRun: false,
-    });
+    const result = await retitleEasyTrackMotions(db, { dryRun: false });
 
     expect(set).toHaveBeenCalledWith({ title: 'Increase node operator staking limit #7' });
     expect(result).toMatchObject({ scanned: 1, updated: 1, unchanged: 0, unlabelled: 0 });
@@ -49,10 +47,7 @@ describe('retitleEasyTrackMotions', () => {
       { id: 'p1', source_id: '7', title: 'Easy Track motion #7', factory_address: UNLABELLED },
     ]);
 
-    const result = await retitleEasyTrackMotions(db, {
-      sourceType: 'lido_easy_track',
-      dryRun: false,
-    });
+    const result = await retitleEasyTrackMotions(db, { dryRun: false });
 
     expect(set).not.toHaveBeenCalled();
     expect(result).toMatchObject({ updated: 0, unlabelled: 1 });
@@ -68,10 +63,7 @@ describe('retitleEasyTrackMotions', () => {
       },
     ]);
 
-    const result = await retitleEasyTrackMotions(db, {
-      sourceType: 'lido_easy_track',
-      dryRun: false,
-    });
+    const result = await retitleEasyTrackMotions(db, { dryRun: false });
 
     expect(set).not.toHaveBeenCalled();
     expect(result).toMatchObject({ updated: 0, unchanged: 1 });
@@ -82,10 +74,7 @@ describe('retitleEasyTrackMotions', () => {
       { id: 'p1', source_id: '7', title: 'Easy Track motion #7', factory_address: LABELLED },
     ]);
 
-    const result = await retitleEasyTrackMotions(db, {
-      sourceType: 'lido_easy_track',
-      dryRun: true,
-    });
+    const result = await retitleEasyTrackMotions(db, { dryRun: true });
 
     expect(set).not.toHaveBeenCalled();
     expect(result).toMatchObject({ updated: 1 });
@@ -100,12 +89,23 @@ describe('retitleEasyTrackMotions', () => {
     }));
     const { db } = mockDb(rows);
 
-    const result = await retitleEasyTrackMotions(db, {
-      sourceType: 'lido_easy_track',
-      dryRun: true,
-    });
+    const result = await retitleEasyTrackMotions(db, { dryRun: true });
 
     expect(result.updated).toBe(9);
     expect(result.samples).toHaveLength(5);
+  });
+
+  it('scopes by the motion-meta join, never a source_type literal', async () => {
+    const { db, select } = mockDb([]);
+
+    await retitleEasyTrackMotions(db, { dryRun: true });
+
+    expect(select['innerJoin']).toHaveBeenCalledWith(
+      'easy_track_motion_meta as m',
+      'm.proposal_id',
+      'proposal.id',
+    );
+    const whereArgs = (select['where'] as ReturnType<typeof vi.fn>).mock.calls.flat();
+    expect(whereArgs).not.toContain('proposal.source_type');
   });
 });
