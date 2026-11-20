@@ -22,6 +22,7 @@ import type {
 } from '@/lib/ai/panel';
 import { serverApi } from '@/lib/api/client';
 import {
+  derivedDescription,
   normalizeProposalDetail,
   presentTally,
   type ProposalDetailView,
@@ -211,7 +212,10 @@ export default async function ProposalDetailPage({ params }: { params: Params })
           <SummaryPanel summary={detail.aiSummary} />
         </Anchor>
         <Anchor id="description">
-          <DescriptionSection description={detail.description} />
+          <DescriptionSection
+            description={detail.description}
+            derived={derivedDescription(detail.metadata)}
+          />
         </Anchor>
         <Anchor id="mismatch">
           <MismatchSection result={mismatch} />
