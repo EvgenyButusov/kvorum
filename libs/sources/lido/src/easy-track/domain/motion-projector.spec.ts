@@ -24,6 +24,14 @@ const CTX: MotionCreatedContext = {
 };
 
 describe('projectMotionCreated', () => {
+  it('titles the proposal with the factory type label when the factory has one', () => {
+    const out = projectMotionCreated(
+      { ...PAYLOAD, evmScriptFactory: '0xFEBD8FAC16DE88206D4B18764E826AF38546AFE0' },
+      CTX,
+    );
+    expect(out.proposal.title).toBe('Increase node operator staking limit #42');
+  });
+
   it('maps a motion to an active, binding proposal with the objection window as the voting window', () => {
     const out = projectMotionCreated(PAYLOAD, CTX);
     expect(out.creatorAddress).toBe(PAYLOAD.creator.toLowerCase());

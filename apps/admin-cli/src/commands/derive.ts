@@ -22,6 +22,13 @@ type DeriveRedecodeOptions = DeriveCommon & {
   dryRun?: boolean;
 };
 
+type DeriveRetitleOptions = DeriveCommon & {
+  source?: string;
+  confirm?: boolean;
+  production?: boolean;
+  dryRun?: boolean;
+};
+
 export function registerDerive(program: Command): void {
   const derive = program.command('derive').description('Derived data management');
 
@@ -164,6 +171,59 @@ export function registerDerive(program: Command): void {
               : `Verification failed; differing fields: ${diffs.join(', ')} (${payload.scope})`,
           payload,
         );
+      });
+    });
+
+  derive
+    .command('retitle')
+    .description('Recompute Easy Track motion titles from their factory type label')
+    .option('--source <type>', 'proposal source type', 'lido_easy_track')
+    .option('--confirm', 'confirm the operation')
+    .option('--production', 'acknowledge production environment')
+    .option('--dry-run', 'report what would change without writing')
+    .option('--format <format>', 'output format: human or json')
+    .action(async function action(opts: DeriveRetitleOptions) {
+      await withDeriveFormat(this, opts, async (format) => {
+        const sourceType = opts.source ?? 'lido_easy_track';
+        if (sourceType !== 'lido_easy_track') {
+          fail(
+            format,
+            ExitCode.ValidationFailure,
+            `retitle is only implemented for lido_easy_track, not ${sourceType}`,
+          );
+        }
+        const dryRun = opts.dryRun === true;
+        if (!dryRun && (opts.confirm !== true || opts.production !== true)) {
+          fail(
+            format,
+            ExitCode.ValidationFailure,
+            'derive retitle requires both --confirm and --production, or --dry-run',
+          );
+        }
+
+        const [{ retitleEasyTrackMotions }, { pgDb }] = await Promise.all([
+          import('@sources/lido'),
+          import('@libs/db'),
+        ]);
+        const run = async () => {
+          const result = await retitleEasyTrackMotions(pgDb, { sourceType, dryRun });
+          emit(
+            format,
+            () =>
+              [
+                `${dryRun ? 'Would retitle' : 'Retitled'} ${result.updated} of ${result.scanned} motion(s)`,
+                `unchanged ${result.unchanged}, unlabelled factory ${result.unlabelled}`,
+                ...result.samples.map((s) => `  #${s.sourceId}: ${s.from} -> ${s.to}`),
+              ].join('\n'),
+            { ...result, source_type: sourceType, dry_run: dryRun },
+          );
+        };
+
+        if (dryRun) {
+          await run();
+          return;
+        }
+        await withAudit('derive retitle', { ...opts }, run);
       });
     });
 

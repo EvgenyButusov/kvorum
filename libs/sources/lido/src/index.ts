@@ -216,6 +216,9 @@ export type { LidoEasyTrackConfig, LidoEasyTrackPluginDeps } from './easy-track/
 export { DEFAULT_MOTION_DURATION_SECONDS } from './easy-track/addresses';
 export { LidoEasyTrackActorAddressDeriver } from './easy-track/domain/actor-address-deriver';
 export { easyTrackMotionTitle } from './easy-track/domain/title-extractor';
+export { retitleEasyTrackMotions } from './easy-track/retitle';
+export type { EasyTrackRetitleResult } from './easy-track/retitle';
+export { easyTrackFactoryLabel } from './easy-track/factories';
 export {
   projectMotionCreated,
   MOTION_TERMINAL_TRANSITIONS,
