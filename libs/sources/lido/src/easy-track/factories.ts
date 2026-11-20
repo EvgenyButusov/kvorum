@@ -1,17 +1,21 @@
 // Presentation-only motion-type labels for Easy Track factories, keyed by lowercase address.
 // Never a factory allowlist: the registered set is data the ingester reads from each
 // `MotionCreated`, and an unlabelled factory degrades to its address.
-// Each label is the deployed contract's verified name in prose (evidence in VERIFICATION.md);
-// repeats are separate deployments of one motion type, told apart only by a registry with no name.
+// Each label is the deployed contract's verified name in prose (evidence in VERIFICATION.md).
+// Keyed by address, not by registration: deregistered factories stay because the motions they
+// created do not go away, and repeated labels are separate deployments of one motion type.
 const EASY_TRACK_FACTORY_LABELS = new Map<string, string>([
   ['0xcbb418f6f9bfd3525ce6aade8f74ecfefe2db5c8', 'Activate node operators'],
   ['0x00a3d6260f70b1660c8646ef25d0820effd7be60', 'Add MEV-Boost relays'],
   ['0x1f809d2cb72a5ab13778811742050eda876129b6', 'Add allowed recipient'],
   ['0x48c135ff690c2aa7f5b11c539104b5855a4f9252', 'Add allowed recipient'],
   ['0x935cb3366faf2cfc415b2099d1f974fd27202b77', 'Add allowed recipient'],
+  ['0xe24230619e9218c1eed3de3489a22f6bc3ce18ff', 'Add allowed recipient'],
   ['0xcaa3af7460e83e665eefec73a7a542e5005c9639', 'Add node operators'],
+  ['0x29e23b1ef0c9fffac8330f9abacebddd827e4b5c', 'Allow consolidation pair'],
   ['0x37d9b09eda477a84e3913fcb4d032efb0bf9b62e', 'Alter tiers in the operator grid'],
   ['0xe31a0599a6772bcf9b2bfc9e25cf941e793c9a7d', 'Change node operator managers'],
+  ['0x2fc78638b77381e9d040163bd6eb1cac967bdbdf', 'Create or update operator group'],
   ['0x8b82c1546d47330335a48406cc3a50da732672e7', 'Deactivate node operators'],
   ['0x6b7863f2c7dee99d3b744fdaedbeb1aecc025535', 'Edit MEV-Boost relays'],
   ['0x6f5c0a5a824773e8f8285bc5aa59ea0aab2a6400', 'Force validator exits in the vault hub'],
@@ -22,12 +26,21 @@ const EASY_TRACK_FACTORY_LABELS = new Map<string, string>([
   ['0x22010d1747cafc370b1f1fbba61022a313c5693b', 'Remove allowed recipient'],
   ['0x7e8effab3083fb26ace6832bfca4c377905f97d7', 'Remove allowed recipient'],
   ['0xd30dc38edefc21875257e8a3123503075226e14b', 'Remove allowed recipient'],
+  ['0xf4d5d97c85ed18f77f99b57f55e9e11d52992632', 'Remove allowed recipient'],
+  ['0x71862abd99819597670007bb992a7a7562fe50f2', 'Report withdrawals for slashed validators'],
+  ['0x8d74020d8eaccdff0366daaffb96e6c98cdfc112', 'Report withdrawals for slashed validators'],
+  ['0xe330516a03bddeba4209b5591112f1aa3dd90f0a', 'Report withdrawals for slashed validators'],
+  ['0x62e9dc68bdcbc46362f40e0bb9c154c9a42e62b0', 'Set deposits reserve target'],
   ['0x6a4f33f05e7412a11100353724bb6a152cf0d305', 'Set jail status in the operator grid'],
   ['0x7d509bff310d9460b1f613e4e40d342201a83ae4', 'Set node operator names'],
   ['0x589e298964b9181d9938b84bb034c3bb9024e2c0', 'Set node operator reward addresses'],
   ['0xbc5642bdd6f2a54b01a75605aae9143525d97308', 'Set the CSM vetted gate tree'],
+  ['0xa121667d1780a1d54eaed67ae17ee13d0f872d60', 'Set the Merkle gate tree'],
+  ['0xf3ec30b86c3dc1b8a1c754d885f9be3160e15b4c', 'Set the Merkle gate tree'],
   ['0xd75778b855886fc5e1ea7d6bfada9eb68b35c19d', 'Set vetted validators limits'],
   ['0xf6b6e7997338c48ea3a8bcfa4bb64a315fda76f4', 'Settle CSM EL stealing penalty'],
+  ['0x0b676adeabcf4a696187cfab90290aa3ac51afa2', 'Settle general delayed penalty'],
+  ['0xfffefc16231edc6dc9c93e364ff4d4e3f787f416', 'Settle general delayed penalty'],
   ['0xaf35a63a4114b7481589fdd9fdb3e35fd65faed7', 'Socialise bad debt in the vault hub'],
   ['0x58a59ddc6aea9b1d5743d024e15dfa4badb56e37', 'Submit exit request hashes (SDVT)'],
   ['0x4f716ad3cc7a3a5cda2359e5b2c84335c171dcde', 'Submit exit request hashes (curated)'],
@@ -37,12 +50,16 @@ const EASY_TRACK_FACTORY_LABELS = new Map<string, string>([
   ['0x200da0b6a9905a377cf8d469664c65db267009d1', 'Top up allowed recipients'],
   ['0x6ab39a8be67d9305799c3f8fdfc95caf3150d17c', 'Top up allowed recipients'],
   ['0x6e04aed774b7c89bb43721acdd7d03c872a51b69', 'Top up allowed recipients'],
+  ['0xa3e98cb26f1277b623edb95cee3bd33269b305f7', 'Top up allowed recipients'],
   ['0xbd08f9d6bf1d25cc7407e4855df1d46c2043b3ea', 'Top up allowed recipients'],
   ['0xbd2b6dc189eefd51b273f5cb2d99ba1ce565fb8c', 'Top up allowed recipients'],
+  ['0xc72d4c3e86b681d7c9ee306d41193c64d709c303', 'Top up allowed recipients'],
   ['0xe1f6babb445f809b97e3505ea91749461050f780', 'Top up allowed recipients'],
   ['0xe5656eee7eed02bde009d77c88247bc8271e26eb', 'Top up allowed recipients'],
   ['0xf2476f967c826722f5505edfc4b2561a34033477', 'Top up allowed recipients'],
   ['0xf23559de8ab37ff7a154384b0822da867cfa7eac', 'Update group share limits in the operator grid'],
+  ['0x5b0de22e65c068430f6e769754d51133775408cc', 'Update staking module share limits'],
+  ['0xde3e46e3129fa4e4e3f66c9024b0a3ad509b27a1', 'Update staking module share limits'],
   ['0x161a4552a625844c822954c5acbac928ee0f399b', 'Update target validator limits'],
   ['0xdfa0bc38113b6d53c2881573fd764ceeff468610', 'Update vault fees in the operator grid'],
 ]);
