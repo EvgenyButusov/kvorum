@@ -27,15 +27,25 @@ Per-source title extraction, applied at proposal-ingestion time and stored in `p
 | `aragon_voting`           | `metadata.title` if present; else first non-empty line of `metadata.description` with the same `#`-stripping; else NULL.                                                                                |
 | `snapshot`                | The Snapshot API's `title` field, taken as-is, truncated to 200 chars with `…` if longer.                                                                                                               |
 | `dual_governance`         | The originating Aragon proposal's title, looked up via the DG state's link to the affected Aragon proposal. NULL if no Aragon proposal is linked.                                                       |
+| `lido_easy_track`         | `{factory type label} #{motionId}` from the motion's `_evmScriptFactory`; the bare placeholder `Easy Track motion #{motionId}` when that factory has no label. Motions carry no proposer prose at all.  |
 
 The extractors are small unit-tested functions in source-local implementations:
 
 - Compound: `libs/sources/compound/src/governor/domain/title-extractor.ts`
 - Aave: `libs/sources/aave/src/governance-v3/domain/title-extractor.ts`
+- Lido Easy Track: `libs/sources/lido/src/easy-track/domain/title-extractor.ts`
 
 Each rule has at least three test fixtures: a typical proposal, an edge case (empty description, missing metadata), and a known-historical example.
 
 The truncation marker is the Unicode ellipsis (`…`, U+2026), not three ASCII dots, so consumers can detect truncation programmatically. The full text is always available in `proposal.description`.
+
+Easy Track is the one rule whose input is not the proposal's own text but a registry keyed on the
+motion factory, so its titles can change when a label is added or corrected. Because `MotionCreated`
+derivation is insert-or-skip, re-deriving never revisits an existing row; `admin-cli derive retitle`
+recomputes stored titles instead, and `proposal.search_vector` (a stored generated column) refreshes
+with the UPDATE. Deriving that title on read was rejected for the same reason: the title is the
+highest-weighted term in that vector, so a read-time rewrite would make search match text the user
+is never shown.
 
 ## Alternatives considered
 
