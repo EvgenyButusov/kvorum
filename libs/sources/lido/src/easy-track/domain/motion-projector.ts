@@ -29,7 +29,8 @@ export interface MotionCreatedContext {
 /**
  * `MotionCreated` → a unified `proposal` (state `active`, the objection window open) + an
  * `easy_track_motion_meta` row. Binding (motions execute on-chain via the EVMScriptExecutor → Agent).
- * Title is the deterministic placeholder; description is empty until the EVMScript is decoded.
+ * Title is the deterministic placeholder; the description stays empty — Easy Track has no proposer
+ * prose, and the read extension derives a summary from the decoded actions instead.
  */
 export function projectMotionCreated(
   payload: MotionCreatedPayload,

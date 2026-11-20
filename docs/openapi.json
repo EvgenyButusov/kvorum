@@ -3732,6 +3732,13 @@
           "factory_address": {
             "type": "string"
           },
+          "factory_label": {
+            "type": "string",
+            "nullable": true
+          },
+          "action_summary": {
+            "type": "string"
+          },
           "objection_ends_at": {
             "type": "string"
           },
@@ -3740,7 +3747,14 @@
             "enum": ["active", "enacted", "objected", "rejected", "canceled"]
           }
         },
-        "required": ["kind", "motion_id", "factory_address", "objection_ends_at", "state"]
+        "required": [
+          "kind",
+          "motion_id",
+          "factory_address",
+          "action_summary",
+          "objection_ends_at",
+          "state"
+        ]
       },
       "ProposalActionDto": {
         "type": "object",

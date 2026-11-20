@@ -6,6 +6,11 @@ import type {
   DualGovernanceProposalMetadataView,
   EasyTrackProposalMetadataView,
 } from './proposal-metadata-views';
+import {
+  buildEasyTrackMotionSummary,
+  type EasyTrackMotionSummaryAction,
+} from '../easy-track/domain/motion-summary';
+import { easyTrackFactoryLabel } from '../easy-track/factories';
 import '../persistence/schema';
 
 // Reads the per-proposal metadata for the three Lido on-chain tracks and shapes it into the
@@ -79,13 +84,40 @@ export class LidoProposalExtensionReadRepository {
       .executeTakeFirst();
     if (row === undefined) return null;
 
+    const factoryLabel = easyTrackFactoryLabel(row.factory_address);
     const metadata: EasyTrackProposalMetadataView = {
       kind: 'easy_track',
       motion_id: row.motion_id,
       factory_address: row.factory_address,
+      factory_label: factoryLabel,
+      action_summary: buildEasyTrackMotionSummary({
+        factoryAddress: row.factory_address,
+        factoryLabel,
+        actions: await this.motionActions(proposalId),
+      }),
       objection_ends_at: isoSecondsRequired(row.objection_ends_at),
       state: row.state,
     };
     return { voting: null, payloads: [], metadata };
+  }
+
+  private async motionActions(proposalId: string): Promise<EasyTrackMotionSummaryAction[]> {
+    return this.db
+      .selectFrom('proposal_action')
+      .select([
+        'payload_index as payloadIndex',
+        'action_index as actionIndex',
+        'target_address as targetAddress',
+        'target_chain_id as targetChainId',
+        'value_wei as valueWei',
+        'function_signature as functionSignature',
+        'decoded_function as decodedFunction',
+        'decoded_arguments as decodedArguments',
+        'calldata',
+      ])
+      .where('proposal_id', '=', proposalId)
+      .orderBy('payload_index')
+      .orderBy('action_index')
+      .execute();
   }
 }

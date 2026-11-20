@@ -70,6 +70,12 @@ export class EasyTrackProposalMetadataDto {
   @ApiProperty()
   declare factory_address: string;
 
+  @ApiPropertyOptional({ type: String, nullable: true })
+  declare factory_label: string | null;
+
+  @ApiProperty()
+  declare action_summary: string;
+
   @ApiProperty()
   declare objection_ends_at: string;
 
