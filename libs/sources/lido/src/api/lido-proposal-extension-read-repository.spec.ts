@@ -107,7 +107,6 @@ describe('LidoProposalExtensionReadRepository', () => {
       kind: 'easy_track',
       motion_id: '99',
       factory_address: '0xFACTORY',
-      // No label is registered yet for this factory, so the summary names the address (KNOWN-033).
       factory_label: null,
       objection_ends_at: '2026-05-18T10:00:00Z',
       state: 'active',
@@ -116,6 +115,29 @@ describe('LidoProposalExtensionReadRepository', () => {
     expect(summary).toContain('`0xfactory`');
     expect(summary).toContain('topUp(uint256,string)');
     expect(summary).toContain('Node operator top-up');
+  });
+
+  it('names the motion type when the factory is in the label registry', async () => {
+    const { db } = mockPg(
+      {
+        proposal_id: 'p4',
+        motion_id: '1049',
+        factory_address: '0xfebd8fac16de88206d4b18764e826af38546afe0',
+        objection_ends_at: new Date('2026-05-18T10:00:00Z'),
+        state: 'active',
+        last_reconcile_check_block: null,
+      },
+      [],
+    );
+    const repo = new LidoProposalExtensionReadRepository(db);
+
+    const ext = await repo.getExtension('p4', 'easy_track');
+    expect(ext?.metadata).toMatchObject({
+      factory_label: 'Increase node operator staking limit',
+    });
+    expect((ext?.metadata as { action_summary: string }).action_summary).toContain(
+      'Increase node operator staking limit',
+    );
   });
 
   it('returns null when the metadata row is missing', async () => {
