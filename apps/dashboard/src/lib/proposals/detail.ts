@@ -256,3 +256,13 @@ function leadingOf(segments: TallySegment[]): TallySegment | null {
   const best = segments.reduce((acc, s) => (s.pct > acc.pct ? s : acc));
   return best.pct > 0 ? best : null;
 }
+
+/**
+ * Markdown summary the API derives from a motion's decoded actions, for sources that publish no
+ * proposer prose. Easy Track is the only one today; other kinds return null and keep their own text.
+ */
+export function derivedDescription(metadata: ProposalMetadata | null): string | null {
+  if (metadata == null || metadata.kind !== 'easy_track') return null;
+  const summary = metadata.action_summary.trim();
+  return summary.length > 0 ? summary : null;
+}

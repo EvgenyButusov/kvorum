@@ -1,5 +1,6 @@
 import {
   classifyChoice,
+  derivedDescription,
   normalizeProposalDetail,
   normalizeVote,
   presentTallySummary,
@@ -177,5 +178,32 @@ describe('presentTallySummary', () => {
   it('is empty when there are no votes, so the row shows a dash', () => {
     expect(presentTallySummary(null)).toEqual([]);
     expect(presentTallySummary([])).toEqual([]);
+  });
+});
+
+describe('derivedDescription', () => {
+  const easyTrack = {
+    kind: 'easy_track' as const,
+    motion_id: '1219',
+    factory_address: '0x2fc78638b77381e9d040163bd6eb1cac967bdbdf',
+    factory_label: 'Create or update operator group',
+    action_summary: '`Create or update operator group` — executes 2 on-chain actions.',
+    objection_ends_at: '2026-11-20T10:00:00Z',
+    state: 'active' as const,
+  };
+
+  it('returns the action summary for an easy_track motion', () => {
+    expect(derivedDescription(easyTrack)).toContain('executes 2 on-chain actions');
+  });
+
+  it('returns null when the summary is blank', () => {
+    expect(derivedDescription({ ...easyTrack, action_summary: '   ' })).toBeNull();
+  });
+
+  it('returns null for other sources, which carry their own prose', () => {
+    expect(
+      derivedDescription({ kind: 'snapshot', space_id: 'lido.eth', flagged: false }),
+    ).toBeNull();
+    expect(derivedDescription(null)).toBeNull();
   });
 });

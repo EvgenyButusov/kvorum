@@ -4,6 +4,7 @@ import { configureAxe } from 'vitest-axe';
 import { DataTable, type ChartTableModel } from './charts/data-table';
 import { Figure } from './charts/figure';
 import { DaoHeader } from './dao/dao-header';
+import { DescriptionSection } from './proposal/description-section';
 import { MismatchSection } from './proposal/mismatch-section';
 import { ProposalCard } from './proposal/proposal-card';
 import { SummaryPanel } from './proposal/summary-panel';
@@ -147,6 +148,17 @@ describe('accessibility (axe) — §6.19', () => {
             generated_at: '2026-08-01T00:00:00.000Z',
           },
         }}
+      />,
+    );
+  });
+
+  it('derived description (rendered markdown) has no violations', async () => {
+    await expectNoViolations(
+      <DescriptionSection
+        description=""
+        derived={
+          '`Top up allowed recipients` \u2014 executes 1 on-chain action.\n\n1. Call `topUp()`'
+        }
       />,
     );
   });

@@ -13,23 +13,39 @@ const CLAMP_WORDS = 120;
 
 /**
  * Full proposal description (§6.9), rendered as GitHub-flavoured markdown. This is the source of
- * truth; the AI summary above is supplementary. Long descriptions render in a bordered box clamped
+ * truth; the AI summary above is supplementary. A source that publishes no proposer prose falls back
+ * to `derived`, the API's summary of the decoded actions. Long descriptions render in a box clamped
  * to ~320px with a fade + expand toggle (§6.9), so the section never dominates the page. The full
  * text is always in the DOM (clamp is visual only), so SSR/SEO still sees everything.
  */
-export function DescriptionSection({ description }: { description: string }) {
+export function DescriptionSection({
+  description,
+  derived,
+}: {
+  description: string;
+  derived?: string | null;
+}) {
   const trimmed = description.trim();
   const [expanded, setExpanded] = useState(false);
   const wordCount = trimmed ? trimmed.split(/\s+/).length : 0;
   const clampable = wordCount > CLAMP_WORDS;
+  const showDerived = trimmed.length === 0 && derived != null && derived.trim().length > 0;
 
   return (
     <Section
       number="02"
       title="Description"
-      reference={trimmed ? <span>{wordCount.toLocaleString()} words</span> : undefined}
+      reference={
+        trimmed ? (
+          <span>{wordCount.toLocaleString()} words</span>
+        ) : showDerived ? (
+          <span>derived</span>
+        ) : undefined
+      }
     >
-      {trimmed.length === 0 ? (
+      {showDerived ? (
+        <DerivedDescription summary={derived.trim()} />
+      ) : trimmed.length === 0 ? (
         <p className="font-mono text-mono-body text-ink-3">
           This proposal has no description text.
         </p>
@@ -66,5 +82,23 @@ export function DescriptionSection({ description }: { description: string }) {
         </div>
       )}
     </Section>
+  );
+}
+
+// Shown in place of proposer prose for sources that publish none (Easy Track motions). Labelled as
+// derived so it is never mistaken for text a proposer wrote, which is what §5.6 audits against.
+function DerivedDescription({ summary }: { summary: string }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <p className="font-mono text-mono-body text-ink-3">
+        This proposal carries no author text. The summary below is derived from its decoded on-chain
+        actions.
+      </p>
+      <div className="border border-dashed border-line-3 bg-bg-2 px-[22px] py-[18px]">
+        <div className={MARKDOWN_PROSE_CLASS}>
+          <Markdown remarkPlugins={[remarkGfm]}>{summary}</Markdown>
+        </div>
+      </div>
+    </div>
   );
 }
