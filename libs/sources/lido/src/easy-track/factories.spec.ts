@@ -15,6 +15,18 @@ describe('easyTrackFactoryLabel', () => {
     );
   });
 
+  it('labels a factory registered after the first snapshot', () => {
+    expect(easyTrackFactoryLabel('0x2fc78638b77381e9d040163bd6eb1cac967bdbdf')).toBe(
+      'Create or update operator group',
+    );
+  });
+
+  it('keeps labelling a deregistered factory, whose motions remain', () => {
+    expect(easyTrackFactoryLabel('0xf6b6e7997338c48ea3a8bcfa4bb64a315fda76f4')).toBe(
+      'Settle CSM EL stealing penalty',
+    );
+  });
+
   it('returns null for a factory outside the snapshot', () => {
     expect(easyTrackFactoryLabel(`0x${'ab'.repeat(20)}`)).toBeNull();
   });
