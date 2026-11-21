@@ -22,13 +22,14 @@ const SAMPLE_LIMIT = 5;
  */
 export async function retitleEasyTrackMotions(
   db: Kysely<PgDatabase>,
-  opts: { sourceType: string; dryRun: boolean },
+  opts: { dryRun: boolean },
 ): Promise<EasyTrackRetitleResult> {
+  // Scoped by the join, not by a `source_type` literal: the source type is per-DAO configuration
+  // read from `dao_source`, so matching it here against a hardcoded string found nothing.
   const rows = await db
     .selectFrom('proposal')
     .innerJoin('easy_track_motion_meta as m', 'm.proposal_id', 'proposal.id')
     .select(['proposal.id', 'proposal.source_id', 'proposal.title', 'm.factory_address'])
-    .where('proposal.source_type', '=', opts.sourceType)
     .orderBy('proposal.source_id')
     .execute();
 

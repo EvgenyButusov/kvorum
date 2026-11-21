@@ -23,7 +23,6 @@ type DeriveRedecodeOptions = DeriveCommon & {
 };
 
 type DeriveRetitleOptions = DeriveCommon & {
-  source?: string;
   confirm?: boolean;
   production?: boolean;
   dryRun?: boolean;
@@ -177,21 +176,12 @@ export function registerDerive(program: Command): void {
   derive
     .command('retitle')
     .description('Recompute Easy Track motion titles from their factory type label')
-    .option('--source <type>', 'proposal source type', 'lido_easy_track')
     .option('--confirm', 'confirm the operation')
     .option('--production', 'acknowledge production environment')
     .option('--dry-run', 'report what would change without writing')
     .option('--format <format>', 'output format: human or json')
     .action(async function action(opts: DeriveRetitleOptions) {
       await withDeriveFormat(this, opts, async (format) => {
-        const sourceType = opts.source ?? 'lido_easy_track';
-        if (sourceType !== 'lido_easy_track') {
-          fail(
-            format,
-            ExitCode.ValidationFailure,
-            `retitle is only implemented for lido_easy_track, not ${sourceType}`,
-          );
-        }
         const dryRun = opts.dryRun === true;
         if (!dryRun && (opts.confirm !== true || opts.production !== true)) {
           fail(
@@ -206,7 +196,7 @@ export function registerDerive(program: Command): void {
           import('@libs/db'),
         ]);
         const run = async () => {
-          const result = await retitleEasyTrackMotions(pgDb, { sourceType, dryRun });
+          const result = await retitleEasyTrackMotions(pgDb, { dryRun });
           emit(
             format,
             () =>
@@ -215,7 +205,7 @@ export function registerDerive(program: Command): void {
                 `unchanged ${result.unchanged}, unlabelled factory ${result.unlabelled}`,
                 ...result.samples.map((s) => `  #${s.sourceId}: ${s.from} -> ${s.to}`),
               ].join('\n'),
-            { ...result, source_type: sourceType, dry_run: dryRun },
+            { ...result, dry_run: dryRun },
           );
         };
 
