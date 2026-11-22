@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react';
 
 import { cn } from '@/lib/utils';
 
-/** Mono footer strip for data-freshness / build / deployment items. */
+/** Mono footer strip for data-freshness / source / build / deployment items. */
 export function FreshFooter({ className, ...props }: ComponentProps<'footer'>) {
   return (
     <footer

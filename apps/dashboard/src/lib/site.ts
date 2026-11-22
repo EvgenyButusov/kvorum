@@ -3,6 +3,9 @@ export const SITE_URL = 'https://kvorum.watch';
 export const SITE_NAME = 'Kvorum';
 export const SITE_DESCRIPTION = 'On-chain governance, made legible.';
 
+/** Public source repository for the dashboard and the rest of the Kvorum stack. */
+export const SOURCE_REPOSITORY_URL = 'https://github.com/EvgenyButusov/kvorum';
+
 /** External operational-status page, linked from the degraded (503) + maintenance system pages. */
 export const STATUS_URL = 'https://status.kvorum.watch';
 

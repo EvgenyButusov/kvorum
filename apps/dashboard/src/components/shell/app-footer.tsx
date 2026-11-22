@@ -1,6 +1,7 @@
 import { Fresh } from '@/components/ui/fresh';
 import { FreshFooter, FreshFooterItem } from '@/components/ui/fresh-footer';
 import { LiveDot } from '@/components/ui/live-dot';
+import { SOURCE_REPOSITORY_URL } from '@/lib/site';
 
 export type AppFooterProps = {
   syncedAt?: number;
@@ -9,7 +10,7 @@ export type AppFooterProps = {
 };
 
 /**
- * Persistent footer strip: data-sync freshness + build + deployment.
+ * Persistent footer strip: data-sync freshness + source + build + deployment.
  *
  * `build` / `deployment` read from the runtime env on the server (this is a server component):
  * BUILD_SHA is baked into the image at `docker build` time from the git SHA (see Dockerfile +
@@ -26,6 +27,16 @@ export function AppFooter({
       <FreshFooterItem>
         <LiveDot live />
         <Fresh timestamp={syncedAt ?? Date.now()} prefix="Synced" />
+      </FreshFooterItem>
+      <FreshFooterItem>
+        <a
+          href={SOURCE_REPOSITORY_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          source · GitHub ↗
+        </a>
       </FreshFooterItem>
       <FreshFooterItem>build · {build}</FreshFooterItem>
       <FreshFooterItem>deployment · {deployment}</FreshFooterItem>
