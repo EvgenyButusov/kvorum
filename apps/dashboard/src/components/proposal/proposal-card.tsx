@@ -4,7 +4,7 @@ import { daoVariant, stateToVariant } from './state';
 import { TallySummary } from './tally-summary';
 import { Pill } from '@/components/ui/pill';
 import { StatePill } from '@/components/ui/state-pill';
-import { formatDeadline, truncateAddress } from '@/lib/format';
+import { formatDeadline, formatProposalId, truncateAddress } from '@/lib/format';
 import type { ProposalListItemView } from '@/lib/proposals/list';
 import { sourceLabel } from '@/lib/proposals/source';
 
@@ -17,7 +17,7 @@ import { sourceLabel } from '@/lib/proposals/source';
 export function ProposalCard({ item, showDao }: { item: ProposalListItemView; showDao: boolean }) {
   const deadline = formatDeadline(item.votingEndsAt);
   const live = item.state === 'active';
-  const idLabel = /^\d+$/.test(item.sourceId) ? `#${item.sourceId}` : item.sourceId;
+  const idLabel = formatProposalId(item.sourceId);
   const proposerName = item.proposer.displayName ?? truncateAddress(item.proposer.address);
 
   return (
@@ -43,8 +43,10 @@ export function ProposalCard({ item, showDao }: { item: ProposalListItemView; sh
       </div>
 
       <h3 className="text-body-lg font-medium leading-snug text-ink">
-        <span className="mr-1 font-mono text-ink-3">{idLabel}</span>
-        {item.title ?? `Proposal #${item.sourceId}`}
+        <span className="mr-1 font-mono text-ink-3" title={item.sourceId}>
+          {idLabel}
+        </span>
+        {item.title ?? `Proposal ${idLabel}`}
       </h3>
 
       <div className="font-mono text-micro text-ink-3">

@@ -3,6 +3,16 @@ export function truncateAddress(address: string): string {
   return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
 }
 
+/**
+ * A proposal's `source_id` for display: `#123` for the numeric ids (Compound, Aave, Aragon, Easy
+ * Track), shortened for the ones that are content hashes. Snapshot ids are 66 characters, which
+ * overflows the ID column and squeezes every other one.
+ */
+export function formatProposalId(sourceId: string): string {
+  if (/^\d+$/.test(sourceId)) return `#${sourceId}`;
+  return sourceId.length > 12 ? `${sourceId.slice(0, 6)}…${sourceId.slice(-4)}` : sourceId;
+}
+
 /** Compact relative time, e.g. "just now", "3m ago", "5h ago", "2d ago". */
 export function formatRelativeTime(input: Date | number, now: number = Date.now()): string {
   const then = typeof input === 'number' ? input : input.getTime();
