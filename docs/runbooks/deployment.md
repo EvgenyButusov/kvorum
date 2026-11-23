@@ -242,9 +242,11 @@ Restarts are safe (#617): the in-flight provider batch and the backfill walk cur
 (`ai_batch` / `ai_backfill_cursor`), so a `rollout restart` / `set env` mid-backfill resumes the batch
 and the walk rather than orphaning a paid batch or re-scanning from page 1.
 
-**Prerequisites:** pgvector installed (one-time setup step 2) and `ANTHROPIC_API_KEY` + `OPENAI_API_KEY`
-present in `kvorum-secrets` (the worker falls back to sentinel keys and fails only on the first LLM
-call otherwise). Budget caps are set in `base/configmap.yaml` (`AI_CAP_*_USD`, $5/mo total).
+**Prerequisites:** pgvector installed (one-time setup step 2), the selected completion provider's key,
+and `OPENAI_API_KEY` for embeddings present in `kvorum-secrets` (the worker falls back to sentinel keys
+and fails only on the first LLM call otherwise). Production selects OpenAI in `base/configmap.yaml`, so
+`OPENAI_API_KEY` covers both completion and embedding calls. Budget caps are set in that ConfigMap
+(`AI_CAP_*_USD`, $5/mo total).
 
 **1 — verify healthy + inert.** After the deploy:
 
