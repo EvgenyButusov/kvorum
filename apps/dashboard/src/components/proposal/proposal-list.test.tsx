@@ -70,6 +70,17 @@ describe('ProposalList', () => {
     expect(screen.getByRole('link', { name: 'Second' })).toBeInTheDocument();
   });
 
+  it('shortens a snapshot content hash in the ID column, keeping the full id on hover', () => {
+    const id = `0x${'ab'.repeat(32)}`;
+    renderList([item(id, 'A Snapshot proposal')]);
+
+    expect(screen.queryByText(id)).not.toBeInTheDocument();
+    // Both layouts are in the DOM (CSS picks one), so both must shorten it.
+    const shown = screen.getAllByTitle(id);
+    expect(shown).toHaveLength(2);
+    for (const el of shown) expect(el).toHaveTextContent('0xabab…abab');
+  });
+
   it('offers no separate sort control and no loaded counter', () => {
     renderList([item('1', 'First'), item('2', 'Second')]);
     // Sorting lives on the Ends / closed header now; the row count was noise.

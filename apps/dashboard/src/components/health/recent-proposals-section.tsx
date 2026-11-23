@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { stateToVariant } from '@/components/proposal/state';
 import { Section } from '@/components/ui/section';
 import { StatePill } from '@/components/ui/state-pill';
-import { formatDeadline } from '@/lib/format';
+import { formatDeadline, formatProposalId } from '@/lib/format';
 import type { ProposalListItemView } from '@/lib/proposals/list';
 
 export function RecentProposalsSection({ proposals }: { proposals: ProposalListItemView[] }) {
@@ -45,7 +45,9 @@ function ProposalRow({ proposal: p }: { proposal: ProposalListItemView }) {
       className="grid items-center gap-4 border-b border-dashed border-line-3 px-3.5 py-2.5 text-body transition-colors hover:bg-bg-2 last:border-b-0"
       style={{ gridTemplateColumns: '70px 1fr 110px 100px 130px' }}
     >
-      <span className="font-mono text-ink-3">#{p.sourceId}</span>
+      <span className="font-mono text-ink-3" title={p.sourceId}>
+        {formatProposalId(p.sourceId)}
+      </span>
       <span className="truncate font-medium text-ink">{p.title ?? 'Untitled'}</span>
       <span>
         <StatePill state={stateToVariant(p.state)}>{p.state}</StatePill>

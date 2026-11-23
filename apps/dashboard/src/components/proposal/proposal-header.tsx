@@ -4,7 +4,7 @@ import { daoVariant, stateToVariant } from './state';
 import { IdentityChip } from '@/components/ui/identity-chip';
 import { Pill } from '@/components/ui/pill';
 import { StatePill } from '@/components/ui/state-pill';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatProposalId } from '@/lib/format';
 import type { ProposalDetailView } from '@/lib/proposals/detail';
 import { sourceExternalLink, sourceLabel } from '@/lib/proposals/source';
 
@@ -23,12 +23,14 @@ export function ProposalHeader({ detail }: { detail: ProposalDetailView }) {
         <Pill dao={daoVariant(detail.daoSlug)}>{detail.daoSlug}</Pill>
         <span className="text-ink-3">
           Source: <span className="text-ink-2">{sourceLabel(detail.sourceType)}</span> ·{' '}
-          <span className="text-ink-2">#{detail.sourceId}</span>
+          <span className="text-ink-2" title={detail.sourceId}>
+            {formatProposalId(detail.sourceId)}
+          </span>
         </span>
       </div>
 
       <h1 className="text-h1 font-semibold leading-tight text-ink">
-        {detail.title ?? `Proposal #${detail.sourceId}`}
+        {detail.title ?? `Proposal ${formatProposalId(detail.sourceId)}`}
       </h1>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-caption text-ink-3">

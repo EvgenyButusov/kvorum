@@ -1,4 +1,10 @@
-import { formatCompactNumber, formatDeadline, formatPower, formatRelativeTime } from './format';
+import {
+  formatCompactNumber,
+  formatDeadline,
+  formatPower,
+  formatProposalId,
+  formatRelativeTime,
+} from './format';
 
 describe('formatDeadline', () => {
   const now = 1_000_000_000_000;
@@ -39,5 +45,23 @@ describe('formatCompactNumber / formatPower', () => {
   it('appends the unit', () => {
     expect(formatPower(1_234_567, 'COMP')).toBe('1.2M COMP');
     expect(formatPower(500)).toBe('500');
+  });
+});
+
+describe('formatProposalId', () => {
+  it('prefixes a numeric id with #', () => {
+    expect(formatProposalId('1219')).toBe('#1219');
+    expect(formatProposalId('1')).toBe('#1');
+  });
+
+  it('shortens a snapshot content hash', () => {
+    const id = `0x${'ab'.repeat(32)}`;
+    expect(id).toHaveLength(66);
+    expect(formatProposalId(id)).toBe('0xabab…abab');
+    expect(formatProposalId(id)).toHaveLength(11);
+  });
+
+  it('leaves a short non-numeric id alone', () => {
+    expect(formatProposalId('0xabc')).toBe('0xabc');
   });
 });

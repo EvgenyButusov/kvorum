@@ -20,7 +20,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { browserApi } from '@/lib/api/client';
-import { formatDateTime, formatDeadline, truncateAddress } from '@/lib/format';
+import { formatDateTime, formatDeadline, formatProposalId, truncateAddress } from '@/lib/format';
 import {
   fetchProposalPage,
   PAGE_SIZE,
@@ -201,18 +201,20 @@ function ProposalTableRow({ item, showDao }: { item: ProposalListItemView; showD
   const deadline = formatDeadline(item.votingEndsAt);
   const absolute = item.votingEndsAt ? formatDateTime(item.votingEndsAt) : null;
   const live = item.state === 'active';
-  const idLabel = /^\d+$/.test(item.sourceId) ? `#${item.sourceId}` : item.sourceId;
+  const idLabel = formatProposalId(item.sourceId);
   const proposerName = item.proposer.displayName ?? truncateAddress(item.proposer.address);
 
   return (
     <TableRow>
-      <TableCell className="whitespace-nowrap align-top text-ink-3">{idLabel}</TableCell>
+      <TableCell className="whitespace-nowrap align-top text-ink-3" title={item.sourceId}>
+        {idLabel}
+      </TableCell>
       <TableCell className="align-top">
         <Link
           href={item.href}
           className="line-clamp-2 font-sans text-body-lg font-medium text-ink hover:text-primary"
         >
-          {item.title ?? `Proposal #${item.sourceId}`}
+          {item.title ?? `Proposal ${idLabel}`}
         </Link>
         <div className="mt-1 text-caption text-ink-3">
           proposer {proposerName} · {sourceLabel(item.sourceType)}
