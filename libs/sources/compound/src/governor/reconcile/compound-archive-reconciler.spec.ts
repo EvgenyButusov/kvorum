@@ -72,6 +72,102 @@ function setup() {
 
 describe('Compound archive reconciliation', () => {
   it.each([
+    undefined,
+    { poll_cursor_block: null },
+    { active_from_block: null },
+    { active_from_block: '1003' },
+  ])('waits for an auditable source range: %j', async (override) => {
+    const { repository, client, writer, run, source } = setup();
+    repository.findSource.mockResolvedValue(override && { ...source, ...override });
+    await run();
+    expect(client.send).not.toHaveBeenCalled();
+    expect(writer.writeCore).not.toHaveBeenCalled();
+    expect(repository.advance).not.toHaveBeenCalled();
+  });
+
+  it('rejects a source whose governor differs from the configured reconciler', async () => {
+    const { repository, client, run, source, metrics } = setup();
+    repository.findSource.mockResolvedValue({ ...source, governor_address: tx });
+    await run();
+    expect(client.send).not.toHaveBeenCalled();
+    expect(metrics.recordOutcome).toHaveBeenCalledWith({
+      source_type: 'compound_governor_oz',
+      outcome: 'archive_audit_failed',
+    });
+  });
+
+  it('caps an audit at the retired source end block', async () => {
+    const { repository, run, source } = setup();
+    repository.findSource.mockResolvedValue({ ...source, active_to_block: '1001' });
+    await run();
+    expect(repository.advance).toHaveBeenCalledExactlyOnceWith('source', 1000n, 1001n);
+  });
+
+  it('waits when initialization does not yield a durable checkpoint', async () => {
+    const { repository, run, source, client } = setup();
+    repository.findSource.mockResolvedValue({ ...source, last_checked_block: null });
+    await run();
+    expect(repository.initialize).toHaveBeenCalledOnce();
+    expect(client.send).not.toHaveBeenCalled();
+    expect(repository.advance).not.toHaveBeenCalled();
+  });
+
+  it('does not overlap audits for the same source', async () => {
+    const { repository, run } = setup();
+    await Promise.all([run(), run()]);
+    expect(repository.findSource).toHaveBeenCalledOnce();
+    expect(repository.advance).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    null,
+    [{ ...raw, removed: true }],
+    [{ ...raw, address: '0x' + '12'.repeat(20) }],
+    [{ ...raw, blockNumber: '0x3e8' }],
+    [{ ...raw, blockNumber: '0x3eb' }],
+  ])('rejects invalid or out-of-range RPC evidence: %j', async (response) => {
+    const { client, repository, writer, run, recordRepair } = setup();
+    client.send.mockResolvedValueOnce(response);
+    await run();
+    expect(repository.advance).not.toHaveBeenCalled();
+    expect(writer.writeCore).not.toHaveBeenCalled();
+    expect(recordRepair).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { ...identity, event_type: 'ProposalExecuted' },
+    { ...identity, block_number: '1002' },
+  ])('rejects conflicting archive metadata: %j', async (conflict) => {
+    const { repository, writer, run } = setup();
+    repository.readIdentities.mockResolvedValue({ pg: [conflict], ch: [identity] });
+    await run();
+    expect(repository.advance).not.toHaveBeenCalled();
+    expect(writer.writeCore).not.toHaveBeenCalled();
+  });
+
+  it('leaves noncanonical archive rows to the reorg pipeline', async () => {
+    const { repository, client, writer, run } = setup();
+    repository.readIdentities.mockResolvedValue({
+      pg: [{ ...identity, block_hash: tx }],
+      ch: [{ ...identity, block_hash: tx }],
+    });
+    client.send.mockResolvedValueOnce([]);
+    await run();
+    expect(writer.writeCore).not.toHaveBeenCalled();
+    expect(repository.advance).toHaveBeenCalledWith('source', 1000n, 1002n);
+    expect(client.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not repair or checkpoint without a canonical block header', async () => {
+    const { repository, client, writer, run } = setup();
+    repository.readIdentities.mockResolvedValue({ pg: [], ch: [] });
+    client.send.mockResolvedValueOnce([raw]).mockResolvedValueOnce({});
+    await run();
+    expect(writer.writeCore).not.toHaveBeenCalled();
+    expect(repository.advance).not.toHaveBeenCalled();
+  });
+
+  it.each([
     { pg: [], ch: [] },
     { pg: [identity], ch: [] },
     { pg: [], ch: [identity] },
