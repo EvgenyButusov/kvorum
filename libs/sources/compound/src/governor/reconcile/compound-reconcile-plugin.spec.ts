@@ -21,7 +21,12 @@ function makeDeps() {
     recordTickDurationSeconds: vi.fn(),
   };
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-  return { proposals, metrics, logger };
+  return {
+    proposals,
+    metrics,
+    logger,
+    archiveRepository: { findSource: vi.fn().mockResolvedValue(undefined) },
+  };
 }
 
 function makeChainCfg(overrides: Partial<{ headLag: number; blocksPerMinute: number }> = {}) {
@@ -119,7 +124,7 @@ describe('reconcile plugin listener', () => {
   it('calls findStaleForReconciliation with confirmedThresholdBlock = headBlock - headLag', async () => {
     const deps = makeDeps();
     const plugin = createCompoundGovernorBravoReconcilePlugin(deps as never);
-    const spec = plugin.buildIngestSpec({} as never, {} as never);
+    const spec = plugin.buildIngestSpec({ daoSourceId: 'reconcile-id' } as never, {} as never);
     if (spec.kind !== 'evm-block-head-poller') throw new Error('wrong kind');
 
     spec.listener({
@@ -130,6 +135,10 @@ describe('reconcile plugin listener', () => {
     });
 
     await new Promise<void>((r) => setTimeout(r, 10));
+    expect(deps.archiveRepository.findSource).toHaveBeenCalledWith(
+      'reconcile-id',
+      'compound_governor_bravo',
+    );
     expect(deps.proposals.findStaleForReconciliation).toHaveBeenCalledWith(
       ['compound_governor_bravo'],
       expect.arrayContaining([

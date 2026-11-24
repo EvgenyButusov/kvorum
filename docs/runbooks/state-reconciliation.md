@@ -4,9 +4,39 @@ This runbook covers operation and validation of the indexer state reconciler for
 
 ## Scope
 
-- Source types: `compound_governor_bravo`, `compound_governor_oz` (reconciler plugin enabled)
-- Explicitly excluded: `compound_governor_alpha` (no reconciler plugin, ADR-048)
-- Reconciler writes only event-silent states.
+- Source types: `compound_governor_alpha`, `compound_governor_bravo`, `compound_governor_oz` (reconciler plugins enabled).
+- State reconciliation writes event-silent states and corrects OZ voting deadlines. Event-backed transitions are derived from archived logs.
+- Independent archive reconciliation repairs missing confirmed governance logs, including votes (issue #725).
+
+## Archive completeness reconciliation (issue #725)
+
+Apply migration `compound_005_archive_reconcile_cursor` before deploying the updated indexer. It adds a per-source durable audit cursor and a partial range index on the PostgreSQL archive.
+
+The existing Compound reconcile head listeners audit both PostgreSQL and ClickHouse against `eth_getLogs` for the original governor source. The worker audits only through the lesser of the confirmed head, the source's persisted live cursor minus 600 blocks (roughly two hours on Ethereum), and its configured end block. On its first run, it checks up to the preceding 50,000 blocks within the source's active range; thereafter it resumes from the independent durable checkpoint. Each tick processes at most 10,000 blocks in 2,000-block chunks. It restores missing events through the normal archive writer and checks both stores again before checkpointing. Missing events are projected by the ordinary indexer. Failed writes, malformed RPC logs, and missing readback leave the audit cursor unchanged; a later tick retries. It does not change the live or backfill cursor.
+
+Monitor the `indexer_compound_archive_audit_lag_blocks` gauge (normally near zero after the initial backlog drains), and the `indexer_state_reconcile_total` counter outcomes `archive_verified`, `archive_repaired`, and `archive_audit_failed`. Both have panels in the Platform Health dashboard. Investigate persistent lag or repeated failures; a stalled or absent live cursor also requires investigation. The failure log is `compound_archive_audit_failed`. Repairs log `compound_archive_repaired` with the audited block interval and recovered count. The issue #725 diagnostics script also reports the audit checkpoints and metrics.
+
+### Repair volume KPI: north star = 0
+
+Use `indexer_compound_archive_audit_events_repaired_total` to count individual verified repairs (one logical event even if both stores were missing it). The low-cardinality labels are `source_type`, `event_type`, and `missing_store` (`postgres`, `clickhouse`, or `both`). Grafana displays rolling 24-hour volume and breakdown; the target is **zero after the initial historical catch-up**. Prometheus counters are process-local and `increase` estimates the count across scrape intervals and restarts; use structured logs for individual identities. Always interpret zero together with audit lag, verification progress, and failure outcomes — an inactive audit is not healthy.
+
+```promql
+sum(increase(indexer_compound_archive_audit_events_repaired_total[24h]))
+```
+
+Each missing event produces `compound_archive_repair_started` followed by either `compound_archive_event_repaired` (after both stores are verified) or `compound_archive_repair_failed`. Logs include source, chain, governor, proposal ID, block and transaction hashes, log index, missing store, and relevant decoded vote or lifecycle values. Full proposal descriptions, calldata, and free-text vote reasons are deliberately omitted; the canonical event identity allows them to be retrieved when needed. Verified events are counted before the next event or checkpoint so a later failure does not erase partial progress. A crash between persistence and telemetry emission can still lose a metric increment; the start record identifies the interrupted repair for triage.
+
+For each nonzero repair count, inspect the per-event logs and correlate the source block/transaction with ingestion logs, queue/DLQ outcomes, RPC responses, and archive failures; identify and fix the upstream cause. Preserve relevant JSON logs during triage: Kubernetes container logs are subject to rotation and are not a permanent audit ledger. Track legitimate event-silent state transitions (`corrected`), OZ deadline refreshes (`deadline_corrected`), and eligible voting power fills (`eligible_voting_power_filled`) separately in the state reconciler counter and corresponding `compound_*_reconciled` logs. They can be normal protocol behavior; distinguish those from unexpected repairs instead of treating all reconciliation writes as ingestion defects.
+
+```sql
+SELECT s.source_type, s.poll_cursor_block, c.last_checked_block,
+       s.poll_cursor_block - 600 - c.last_checked_block AS blocks_behind_safe_cursor
+FROM dao_source s
+LEFT JOIN compound_archive_reconcile_cursor c ON c.dao_source_id = s.id
+WHERE s.source_type IN ('compound_governor_alpha', 'compound_governor_bravo', 'compound_governor_oz');
+```
+
+This is a rolling completeness check, not a full-history validation or a proof of RPC completeness. An RPC provider that silently omits the same event on both the original ingestion and the independent audit can still evade detection. Historical ranges preceding the initial audit window require a separately scoped canonical audit. Reorg cleanup remains the responsibility of the existing reorg pipeline. Projection rows whose parent proposal is not yet derived are held for retry rather than dropped or exhausted into the DLQ.
 
 ## Prerequisites
 

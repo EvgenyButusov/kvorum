@@ -1,5 +1,5 @@
-import { Module, Logger } from '@nestjs/common';
-import { ChainContextRegistry } from '@libs/chain';
+import { Module, Logger, ConsoleLogger } from '@nestjs/common';
+import { ChainContextRegistry, type Logger as ChainLogger } from '@libs/chain';
 import {
   ArchiveEventRepository,
   ArchiveDerivationRepository,
@@ -10,6 +10,7 @@ import {
   chDb,
   pgDb,
 } from '@libs/db';
+import { defineCounter, defineGauge } from '@libs/observability';
 import {
   COMPOUND_ACTOR_SWEEP_EXTRACTOR,
   CompTokenArchiveWriter,
@@ -17,6 +18,7 @@ import {
   CompTokenEventRepository,
   CompTokenDelegationProjectionApplier,
   CompoundProposalRepository,
+  CompoundArchiveReconcileRepository,
   GovernorArchivePayloadRepository,
   GovernorArchiveWriter,
   GovernorEventRepository,
@@ -36,6 +38,34 @@ import { DbModule } from '@nest/db';
 import { buildDriverMetrics } from '../../reconcile-metrics';
 
 export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
+const archiveAuditLag = defineGauge({
+  name: 'compound_archive_audit_lag_blocks',
+  description: 'Blocks remaining behind the safe Compound archive reconciliation target',
+});
+const archiveEventsRepaired = defineCounter({
+  name: 'compound_archive_audit_events_repaired',
+  description: 'Individual missing Compound events restored and verified in both archives',
+});
+
+// The indexer uses Nest's text console logger by default. Emit single-line JSON
+// for reconciliation so operators can reliably query event identity and values.
+export function createReconcileLogger(): ChainLogger {
+  const logger = new ConsoleLogger('CompoundReconcile', {
+    json: true,
+    colors: false,
+    compact: true,
+  });
+  const message = (event: string, details: unknown) => ({
+    ...(details && typeof details === 'object' ? details : {}),
+    event,
+  });
+  return {
+    info: (event, details) => logger.log(message(event, details)),
+    warn: (event, details) => logger.warn(message(event, details)),
+    error: (event, details) => logger.error(message(event, details)),
+    debug: (event, details) => logger.debug(message(event, details)),
+  };
+}
 
 @Module({
   imports: [
@@ -88,19 +118,20 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
     },
     {
       provide: GovernorProjectionApplier,
-      useFactory: (archive: ArchiveDerivationRepository) =>
+      useFactory: (archive: ArchiveDerivationRepository, registry: ChainContextRegistry) =>
         new GovernorProjectionApplier({
           pgDb,
           chDb,
           archive,
           payloads: new GovernorArchivePayloadRepository(chDb),
+          registry,
           metrics: {
             batchLookupSeconds: () => undefined,
             processed: () => undefined,
           },
           logger: toChainLogger(new Logger('GovernorProjectionApplier')),
         }),
-      inject: [ArchiveDerivationRepository],
+      inject: [ArchiveDerivationRepository, ChainContextRegistry],
     },
     {
       provide: GovernorVoteProjectionApplier,
@@ -168,8 +199,33 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
       ): SourcePlugin => {
         const governorPayloads = new GovernorArchivePayloadRepository(chDb);
         const compTokenPayloads = new CompTokenArchivePayloadRepository(chDb);
-        const reconcileLogger = toChainLogger(new Logger('CompoundReconcile'));
+        const reconcileLogger = createReconcileLogger();
         const metrics = buildDriverMetrics();
+        const archiveRepository = new CompoundArchiveReconcileRepository(pgDb, chDb);
+        const recordArchiveAuditLag = (sourceType: string, blocks: number) =>
+          archiveAuditLag.record(blocks, { source_type: sourceType });
+        const recordArchiveRepair: NonNullable<
+          Parameters<typeof createCompoundGovernorOzReconcilePlugin>[0]['recordArchiveRepair']
+        > = (labels) => archiveEventsRepaired.add(1, { ...labels });
+        // Export zero-valued series before the first repair so Prometheus can
+        // measure the first increment and distinguish healthy zero from no data.
+        for (const source_type of [
+          'compound_governor_alpha',
+          'compound_governor_bravo',
+          'compound_governor_oz',
+        ]) {
+          for (const event_type of [
+            'ProposalCreated',
+            'ProposalQueued',
+            'ProposalExecuted',
+            'ProposalCanceled',
+            'VoteCast',
+          ]) {
+            for (const missing_store of ['postgres', 'clickhouse', 'both']) {
+              archiveEventsRepaired.add(0, { source_type, event_type, missing_store });
+            }
+          }
+        }
         const logger = new Logger('CompoundSourceModule');
         logger.log('compound_comp_token plugin registered');
 
@@ -187,18 +243,30 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
               logger: toChainLogger(new Logger('CompTokenIngester')),
             }),
             createCompoundGovernorBravoReconcilePlugin({
+              archiveRepository,
+              archiveWriter,
+              recordArchiveAuditLag,
+              recordArchiveRepair,
               proposals: proposalRepo,
               proposalRepo: sharedProposalRepo,
               metrics,
               logger: reconcileLogger,
             }),
             createCompoundGovernorOzReconcilePlugin({
+              archiveRepository,
+              archiveWriter,
+              recordArchiveAuditLag,
+              recordArchiveRepair,
               proposals: proposalRepo,
               proposalRepo: sharedProposalRepo,
               metrics,
               logger: reconcileLogger,
             }),
             createCompoundGovernorAlphaReconcilePlugin({
+              archiveRepository,
+              archiveWriter,
+              recordArchiveAuditLag,
+              recordArchiveRepair,
               proposals: proposalRepo,
               proposalRepo: sharedProposalRepo,
               metrics,

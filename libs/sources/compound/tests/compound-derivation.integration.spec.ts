@@ -23,6 +23,7 @@ describeIf('compound governor derivation', () => {
   let applier: GovernorProjectionApplier;
   let archive: ArchiveDerivationRepository;
   let daoSourceId: string;
+  const blockNumbers = new Map<string, bigint>();
 
   beforeAll(async () => {
     archive = new ArchiveDerivationRepository(pgDb);
@@ -31,6 +32,18 @@ describeIf('compound governor derivation', () => {
       chDb,
       archive,
       payloads: new GovernorArchivePayloadRepository(chDb),
+      registry: {
+        peek: () => ({
+          chainCfg: { chainId: CHAIN_ID },
+          client: {
+            send: async (_method: string, [hash]: [string]) => ({
+              hash,
+              number: '0x' + blockNumbers.get(hash)!.toString(16),
+              timestamp: '0x6955b900',
+            }),
+          },
+        }),
+      } as never,
       metrics: { batchLookupSeconds: () => {}, processed: () => {} },
     });
 
@@ -94,6 +107,7 @@ describeIf('compound governor derivation', () => {
     blockHash: string;
     payload: Record<string, unknown>;
   }): Promise<void> {
+    blockNumbers.set(opts.blockHash, opts.blockNumber);
     await chDb
       .insertInto('archive_event_compound_governor_bravo')
       .values({

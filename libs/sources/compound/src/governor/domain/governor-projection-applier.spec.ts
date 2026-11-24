@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ArchiveDerivationRow } from '@libs/db';
-import { GovernorProjectionApplier } from './governor-projection-applier';
+import {
+  GovernorProjectionApplier,
+  type GovernorProjectionApplierDeps,
+} from './governor-projection-applier';
 import type { GovernorArchivePayloadRow } from '../persistence/governor-archive-payload-repository';
 
 const ROW: ArchiveDerivationRow = {
@@ -13,7 +16,7 @@ const ROW: ArchiveDerivationRow = {
   tx_hash: '0xtx',
   log_index: 1,
   event_type: 'ProposalCreated',
-  confirmed_at: new Date('2026-01-01T00:00:00Z'),
+  received_at: new Date('2026-01-02T00:00:00Z'),
   derivation_attempt_count: 0,
 };
 
@@ -64,9 +67,29 @@ function makeMetrics() {
   };
 }
 
+const EVENT_TIMESTAMP = new Date('2026-01-01T00:00:00Z');
+function makeApplier(deps: Omit<GovernorProjectionApplierDeps, 'registry'>) {
+  return new GovernorProjectionApplier({
+    ...deps,
+    registry: {
+      peek: () => ({
+        chainCfg: { chainId: ROW.chain_id },
+        client: {
+          send: async () => ({
+            number: '0x64',
+            hash: ROW.block_hash,
+            timestamp: '0x' + (EVENT_TIMESTAMP.getTime() / 1000).toString(16),
+          }),
+        },
+      }),
+    } as never,
+  });
+}
+
 interface ProjectionTxOptions {
   proposalInserted?: boolean;
   advanceStateRows?: number;
+  proposalExists?: boolean;
 }
 
 function makeProjectionTx(options: ProjectionTxOptions = {}) {
@@ -74,8 +97,10 @@ function makeProjectionTx(options: ProjectionTxOptions = {}) {
     insertedProposal: undefined as unknown,
     insertedActions: undefined as unknown,
     insertedChoices: undefined as unknown,
+    proposalStateUpdate: undefined as unknown,
     markedDerivedId: undefined as string | undefined,
     markedActorResolvedId: undefined as string | undefined,
+    heldUntil: undefined as Date | undefined,
     upsertedCompoundMeta: false,
     transactionCount: 0,
   };
@@ -105,6 +130,16 @@ function makeProjectionTx(options: ProjectionTxOptions = {}) {
           selectAll: vi.fn().mockReturnThis(),
           where: vi.fn().mockReturnThis(),
           executeTakeFirst: vi.fn().mockResolvedValue(undefined),
+        });
+      }
+
+      if (table === 'proposal') {
+        return chain({
+          selectAll: vi.fn().mockReturnThis(),
+          where: vi.fn().mockReturnThis(),
+          executeTakeFirst: vi
+            .fn()
+            .mockResolvedValue(options.proposalExists === false ? undefined : { id: 'proposal-1' }),
         });
       }
 
@@ -149,9 +184,12 @@ function makeProjectionTx(options: ProjectionTxOptions = {}) {
       let lastArchiveSet: 'derived' | 'actor_resolved' | undefined;
       const updateChain = chain({
         set: vi.fn((values: Record<string, unknown>) => {
+          if (table === 'proposal') calls.proposalStateUpdate = values;
           if (table === 'archive_event') {
             if ('derivation_actor_resolved_at' in values) lastArchiveSet = 'actor_resolved';
             if ('derived_at' in values) lastArchiveSet = 'derived';
+            if ('derivation_hold_until' in values)
+              calls.heldUntil = values.derivation_hold_until as Date;
           }
           return updateChain;
         }),
@@ -186,7 +224,7 @@ function makeProjectionTx(options: ProjectionTxOptions = {}) {
 
 describe('GovernorProjectionApplier', () => {
   it('supports both compound governor source types', () => {
-    const applier = new GovernorProjectionApplier({
+    const applier = makeApplier({
       pgDb: {} as never,
       chDb: {} as never,
       archive: {} as never,
@@ -211,7 +249,7 @@ describe('GovernorProjectionApplier', () => {
     };
     const metrics = makeMetrics();
 
-    const applier = new GovernorProjectionApplier({
+    const applier = makeApplier({
       pgDb: pgDb as never,
       chDb: {} as never,
       archive: archive as never,
@@ -234,6 +272,7 @@ describe('GovernorProjectionApplier', () => {
         source_id: '42',
         voting_starts_block: '200',
         voting_ends_block: '300',
+        state_updated_at: EVENT_TIMESTAMP,
       }),
     );
     expect(calls.insertedActions).toEqual(expect.any(Array));
@@ -248,7 +287,7 @@ describe('GovernorProjectionApplier', () => {
 
   it('does not write children when ProposalCreated is idempotent', async () => {
     const { pgDb, calls } = makeProjectionTx({ proposalInserted: false });
-    const applier = new GovernorProjectionApplier({
+    const applier = makeApplier({
       pgDb: pgDb as never,
       chDb: {} as never,
       archive: { incrementAttemptCount: vi.fn() } as never,
@@ -268,7 +307,7 @@ describe('GovernorProjectionApplier', () => {
   it('advances state and upserts queued_at_block on ProposalQueued', async () => {
     const { pgDb, tx, calls } = makeProjectionTx();
     const metrics = makeMetrics();
-    const applier = new GovernorProjectionApplier({
+    const applier = makeApplier({
       pgDb: pgDb as never,
       chDb: {} as never,
       archive: { incrementAttemptCount: vi.fn() } as never,
@@ -281,6 +320,12 @@ describe('GovernorProjectionApplier', () => {
     await applier.applyBatch([{ ...ROW, event_type: 'ProposalQueued' }]);
 
     expect(tx.updateTable).toHaveBeenCalledWith('proposal');
+    expect(calls.proposalStateUpdate).toEqual(
+      expect.objectContaining({
+        state: 'queued',
+        state_updated_at: EVENT_TIMESTAMP,
+      }),
+    );
     expect(calls.upsertedCompoundMeta).toBe(true);
     expect(calls.markedDerivedId).toBe('archive-1');
     expect(calls.markedActorResolvedId).toBe('archive-1');
@@ -292,7 +337,7 @@ describe('GovernorProjectionApplier', () => {
   it('advances state without touching compound_proposal_meta on ProposalExecuted', async () => {
     const { pgDb, tx, calls } = makeProjectionTx();
     const metrics = makeMetrics();
-    const applier = new GovernorProjectionApplier({
+    const applier = makeApplier({
       pgDb: pgDb as never,
       chDb: {} as never,
       archive: { incrementAttemptCount: vi.fn() } as never,
@@ -316,7 +361,7 @@ describe('GovernorProjectionApplier', () => {
   it('records skipped_state_guard and skips queued_at_block upsert when state guard blocks', async () => {
     const { pgDb, calls } = makeProjectionTx({ advanceStateRows: 0 });
     const metrics = makeMetrics();
-    const applier = new GovernorProjectionApplier({
+    const applier = makeApplier({
       pgDb: pgDb as never,
       chDb: {} as never,
       archive: { incrementAttemptCount: vi.fn() } as never,
@@ -336,11 +381,42 @@ describe('GovernorProjectionApplier', () => {
     );
   });
 
+  it.each([
+    ['ProposalQueued', QUEUED_PAYLOAD],
+    ['ProposalExecuted', EXECUTED_PAYLOAD],
+  ] as const)(
+    'holds %s until the corresponding creation is derived',
+    async (eventType, payload) => {
+      const { pgDb, tx, calls } = makeProjectionTx({ proposalExists: false });
+      const archive = { incrementAttemptCount: vi.fn() };
+      const metrics = makeMetrics();
+      const applier = makeApplier({
+        pgDb: pgDb as never,
+        chDb: {} as never,
+        archive: archive as never,
+        payloads: { fetchPayloads: vi.fn().mockResolvedValue([payload]) } as never,
+        metrics,
+      });
+      const before = Date.now();
+
+      await applier.applyBatch([{ ...ROW, event_type: eventType }]);
+
+      expect(calls.heldUntil?.getTime()).toBeGreaterThan(before);
+      expect(tx.updateTable).not.toHaveBeenCalledWith('proposal');
+      expect(calls.markedDerivedId).toBeUndefined();
+      expect(calls.markedActorResolvedId).toBeUndefined();
+      expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
+      expect(metrics.processed).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'held', reason: 'no_proposal' }),
+      );
+    },
+  );
+
   it('increments attempt count when archive payload JSON cannot be decoded', async () => {
     const archive = {
       incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
     };
-    const applier = new GovernorProjectionApplier({
+    const applier = makeApplier({
       pgDb: makeProjectionTx().pgDb as never,
       chDb: {} as never,
       archive: archive as never,
@@ -361,7 +437,7 @@ describe('GovernorProjectionApplier', () => {
     };
     const metrics = makeMetrics();
     const { pgDb, calls } = makeProjectionTx();
-    const applier = new GovernorProjectionApplier({
+    const applier = makeApplier({
       pgDb: pgDb as never,
       chDb: {} as never,
       archive: archive as never,

@@ -289,6 +289,133 @@
           "legendFormat": "active — {{source_type}}"
         }
       ]
+    },
+    {
+      "id": 11,
+      "title": "Compound archive audit lag (blocks)",
+      "description": "Remaining blocks behind the safe audit target. Persistent lag indicates reconciliation is stalled.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 46 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "max by (source_type) (indexer_compound_archive_audit_lag_blocks)",
+          "legendFormat": "{{source_type}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Compound archive audit chunk outcomes (1h)",
+      "description": "Audit chunks requiring repair or failing verification; investigate repeated failures.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 46 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (source_type, outcome) (increase(indexer_state_reconcile_total{outcome=~\"archive_repaired|archive_audit_failed\"}[1h]))",
+          "legendFormat": "{{source_type}} — {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Repaired governance events (24h) — target 0",
+      "description": "Individual verified archive repairs, not chunks. Each event counts once even if both stores were missing it. Investigate every nonzero value after initial catch-up.",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 54 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum(increase(indexer_compound_archive_audit_events_repaired_total[24h]))",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Repaired governance events by source, type and missing store (24h)",
+      "description": "Breakdown for ingestion-gap triage. Zero is the steady-state target.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 54 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": { "drawStyle": "line", "fillOpacity": 10 }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (source_type, event_type, missing_store) (increase(indexer_compound_archive_audit_events_repaired_total[24h])) > 0",
+          "legendFormat": "{{source_type}} / {{event_type}} / {{missing_store}}"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Compound state and metadata reconciliation (24h)",
+      "description": "Expected event-silent transitions and deadline refreshes are tracked separately from missing archive events. Missed event findings warrant investigation.",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 62 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": { "drawStyle": "line", "fillOpacity": 10 }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (source_type, outcome) (increase(indexer_state_reconcile_total{source_type=~\"compound_governor_.*\",outcome=~\"corrected|deadline_corrected|eligible_voting_power_filled|missed_event\"}[24h]))",
+          "legendFormat": "{{source_type}} / {{outcome}}"
+        }
+      ]
     }
   ]
 }

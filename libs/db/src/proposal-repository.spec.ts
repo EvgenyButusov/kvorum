@@ -309,11 +309,11 @@ describe('ProposalRepository', () => {
       ['source_type', '=', 'source_a'],
       ['source_id', '=', '42'],
       ['state', 'not in', ['executed', 'canceled', 'defeated']],
-      ['state', 'in', ['pending', 'queued', 'active']],
+      ['state', 'in', ['pending', 'queued', 'active', 'succeeded']],
     ]);
   });
 
-  it('queues pending or active proposals', async () => {
+  it('queues pending, active or succeeded proposals', async () => {
     const update = makeUpdateChain(0n);
     const repo = new ProposalRepository({ updateTable: update.updateTable } as never);
 
@@ -325,7 +325,11 @@ describe('ProposalRepository', () => {
       stateUpdatedAt: new Date('2026-01-01T00:00:00Z'),
     });
 
-    expect(update.where.mock.calls.at(-1)).toEqual(['state', 'in', ['pending', 'active']]);
+    expect(update.where.mock.calls.at(-1)).toEqual([
+      'state',
+      'in',
+      ['pending', 'active', 'succeeded'],
+    ]);
     expect(update.set).toHaveBeenCalledWith({
       state: 'queued',
       state_updated_at: new Date('2026-01-01T00:00:00Z'),
@@ -335,8 +339,8 @@ describe('ProposalRepository', () => {
 
   it.each([
     ['active', ['pending']],
-    ['executed', ['pending', 'queued', 'active']],
-    ['canceled', ['pending', 'queued', 'active']],
+    ['executed', ['pending', 'queued', 'active', 'succeeded']],
+    ['canceled', ['pending', 'queued', 'active', 'succeeded']],
     ['defeated', ['pending', 'active']],
   ] as const)('uses the expected allowed-from states for %s', async (targetState, expected) => {
     const update = makeUpdateChain(0n);
@@ -419,12 +423,18 @@ describe('ProposalRepository', () => {
     const startsAt = new Date('2026-01-01T00:00:00Z');
 
     await repo.fillTimestamps([
-      { id: 'proposal-1', voting_starts_at: startsAt, voting_ends_at: null },
+      {
+        id: 'proposal-1',
+        voting_starts_at: startsAt,
+        voting_ends_at: null,
+        expectedVotingEndsBlock: '456',
+      },
     ]);
 
     expect(update.updateTable).toHaveBeenCalledWith('proposal');
     expect(update.set).toHaveBeenCalledWith(expect.any(Function));
     expect(update.where).toHaveBeenCalledWith('id', '=', 'proposal-1');
+    expect(update.where).toHaveBeenCalledWith('voting_ends_block', 'is not distinct from', '456');
     expect(update.execute).toHaveBeenCalledOnce();
   });
 

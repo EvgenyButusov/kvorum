@@ -26,11 +26,12 @@ export function makeIngesterListener<TEvent extends { type: ArchiveEventType; pa
         try {
           decoded = decode(log);
         } catch (err) {
-          await routeDecodeErrorToDlq(deps, log, err);
+          const durable = await routeDecodeErrorToDlq(deps, log, err);
           chainMetrics.archiveDecodeErrors.add(1, {
             source: deps.context.sourceLabel,
             reason: err instanceof DecodeError ? err.reason : 'unknown',
           });
+          if (!durable && options.onWriteFailure === 'throw') throw err;
           continue;
         }
 
@@ -38,7 +39,10 @@ export function makeIngesterListener<TEvent extends { type: ArchiveEventType; pa
         if (options.filter && !options.filter(decoded)) continue;
 
         try {
-          await deps.archiveWriter.write(deps.context, decoded, log);
+          const outcome = await deps.archiveWriter.write(deps.context, decoded, log);
+          if (outcome?.result === 'unreachable' && options.onWriteFailure === 'throw') {
+            throw new Error('Archive write and DLQ are both unreachable');
+          }
         } catch (err) {
           chainMetrics.archiveChWriteErrors.add(1, { source: deps.context.sourceLabel });
           deps.logger.error('ch_write_error', {
@@ -62,7 +66,7 @@ async function routeDecodeErrorToDlq(
   deps: { context: ArchiveWriteContext; logger: Logger; dlqRepo: DlqRepository },
   log: LogEvent,
   err: unknown,
-): Promise<void> {
+): Promise<boolean> {
   const reason = err instanceof DecodeError ? err.reason : 'unknown';
   const dlqRow: NewIngestionDlq = {
     stage: 'archive_decode',
@@ -91,10 +95,12 @@ async function routeDecodeErrorToDlq(
       blockHash: log.blockHash,
       reason,
     });
+    return true;
   } catch (dlqErr) {
     deps.logger.error('decode_error_dlq_insert_failed', {
       originalError: String(err),
       dlqError: String(dlqErr),
     });
+    return false;
   }
 }

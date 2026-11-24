@@ -1,5 +1,5 @@
 import type { Kysely } from 'kysely';
-import { silentLogger, type Logger } from '@libs/chain';
+import { silentLogger, type ChainContextRegistry, type Logger } from '@libs/chain';
 import {
   ActorRepository,
   ArchiveActorResolutionRepository,
@@ -9,6 +9,7 @@ import {
   ProposalRepository,
   type PgDatabase,
 } from '@libs/db';
+import { VoteBlockTimestampFetcher } from '@sources/core';
 import { projectCompoundProposalEvent } from './proposal-projector';
 import type {
   CompoundGovernorEvent,
@@ -25,12 +26,15 @@ import {
 
 export type CompoundDerivationOutcome =
   | 'derived'
+  | 'held'
   | 'skipped_state_guard'
   | 'skipped_idempotent'
   | 'failed';
 
 export type CompoundDerivationFailureReason =
   | 'payload_missing'
+  | 'no_proposal'
+  | 'block_timestamp_unavailable'
   | 'decode_error'
   | 'projection_apply_error';
 
@@ -49,6 +53,7 @@ export interface GovernorProjectionApplierDeps {
   chDb: Kysely<ClickHouseDatabase>;
   archive: ArchiveDerivationRepository;
   payloads: GovernorArchivePayloadRepository;
+  registry: Pick<ChainContextRegistry, 'peek'>;
   metrics: GovernorProjectionMetrics;
   logger?: Logger;
 }
@@ -60,6 +65,8 @@ interface CompoundProjectionRepositories {
   archive: ArchiveDerivationRepository;
   actorResolution: ArchiveActorResolutionRepository;
 }
+
+const MISSING_PROPOSAL_HOLD_MS = 60_000;
 
 export class GovernorProjectionApplier {
   readonly kind = 'projection' as const;
@@ -81,12 +88,15 @@ export class GovernorProjectionApplier {
   private readonly payloads: GovernorArchivePayloadRepository;
   private readonly metrics: GovernorProjectionMetrics;
   private readonly logger: Logger;
+  private readonly registry: Pick<ChainContextRegistry, 'peek'>;
+  private readonly blockTimestamps = new VoteBlockTimestampFetcher();
 
   constructor(deps: GovernorProjectionApplierDeps) {
     this.pgDb = deps.pgDb;
     this.chDb = deps.chDb;
     this.archive = deps.archive;
     this.payloads = deps.payloads;
+    this.registry = deps.registry;
     this.metrics = deps.metrics;
     this.logger = deps.logger ?? silentLogger;
   }
@@ -145,13 +155,30 @@ export class GovernorProjectionApplier {
     }
 
     try {
+      // The archive receive time records ingestion, which can be much later
+      // than the event during backfills. Lifecycle chronology is block-based.
+      const chainCtx = this.registry.peek(row.chain_id);
+      const timestamps =
+        chainCtx === undefined
+          ? undefined
+          : await this.blockTimestamps.fetchBatch(chainCtx, [
+              { blockNumber: row.block_number, blockHash: row.block_hash },
+            ]);
+      const eventAt = timestamps?.get(
+        this.blockTimestamps.resultKey(row.block_number, row.block_hash),
+      );
+      if (eventAt === undefined) {
+        this.record(row, 'failed', 'block_timestamp_unavailable');
+        await this.archive.incrementAttemptCount(row.id);
+        return;
+      }
       const projection = projectCompoundProposalEvent(event, {
         id: row.id,
         dao_source_id: row.dao_source_id,
         source_type: row.source_type,
         chain_id: row.chain_id,
         block_number: row.block_number,
-        confirmed_at: row.received_at,
+        confirmed_at: eventAt,
       });
 
       await this.transaction(
@@ -180,6 +207,18 @@ export class GovernorProjectionApplier {
               this.record(row, 'skipped_idempotent', null);
             }
           } else {
+            // A historical catch-up can archive a lifecycle event before its creation.
+            // A zero-row update in that case is not a terminal state guard.
+            const proposal = await proposals.findBySource({
+              daoId,
+              sourceType: projection.sourceType,
+              sourceId: projection.sourceId,
+            });
+            if (proposal === undefined) {
+              await archive.markHeld(row.id, new Date(Date.now() + MISSING_PROPOSAL_HOLD_MS));
+              this.record(row, 'held', 'no_proposal');
+              return;
+            }
             const advanced = await proposals.advanceState({
               daoId,
               sourceType: projection.sourceType,

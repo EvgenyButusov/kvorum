@@ -95,6 +95,23 @@ describe('BackfillRangeFetcher', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  it('does not dispatch or checkpoint a malformed range', async () => {
+    fake.enqueueSuccess([makeRawLog(100n), { ...makeRawLog(101n), blockNumber: null }]);
+    const listener = vi.fn();
+    const onChunkComplete = vi.fn();
+    const fetcher = new BackfillRangeFetcher({
+      ...BASE_OPTS,
+      rpcClient: client,
+      fromBlock: 100n,
+      toBlock: 199n,
+      listener,
+      onChunkComplete,
+    });
+    await expect(fetcher.run()).rejects.toThrow();
+    expect(listener).not.toHaveBeenCalled();
+    expect(onChunkComplete).not.toHaveBeenCalled();
+  });
+
   it('#3 — adaptive shrink: -32005 halves chunk size then completes', async () => {
     // fromBlock=0, toBlock=19_999, initial chunkSize=10_000
     // First request [0..9999] → -32005; shrink to 5000

@@ -112,6 +112,12 @@ Every process that produces metrics exposes a `GET /metrics` endpoint in Prometh
 
 Each app's `main.ts` sets `OTEL_SERVICE_NAME ??= '<app>'` before the Nest context boots. `OTEL_SERVICE_NAMESPACE` must be provided via environment — `@libs/observability` throws on import if it is unset.
 
+### Reconciliation quality KPI
+
+The north star for data-integrity reconciliation is **zero unexpected data repairs** in steady state. Reconciliation is a safety net, not a substitute for correct ingestion and projection. Every reconciler added or modified must expose counts of actual repaired logical records (not just batches or passes), classified by bounded source/event/repair-reason labels, and structured per-record logs with stable identity, changed values, and outcome for triage. Record successful repairs when verified, independently of a later checkpoint or batch failure; failed attempts must remain visible and retryable. Never use record identifiers, addresses, or transaction hashes as metric labels. Do not log secrets or arbitrary unbounded payloads.
+
+Track rolling 24-hour repair volume with a target of zero after historical catch-up; any nonzero result warrants root-cause investigation and a preventive fix. Keep expected protocol behavior (e.g. event-silent state transitions, legitimate deadline extensions, enrichment) separately observable; those operations are not ingestion defects and must not be disabled to improve the KPI. A stalled or disabled reconciliation loop is not healthy zero. Check progress/lag and failures alongside repair counts. See `docs/runbooks/state-reconciliation.md` for the Compound implementation and operational triage.
+
 ## Kysely migrations
 
 Postgres migration files come from two locations, merged and sorted alphabetically by filename before being applied:

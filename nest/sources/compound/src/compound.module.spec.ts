@@ -1,9 +1,14 @@
 import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderMetrics } from '@libs/observability';
 import { COMP_TOKEN_ADDRESS } from '@sources/compound';
 import type { SourcePlugin } from '@sources/core';
-import { COMPOUND_SOURCE_PLUGIN, CompoundSourceModule } from './compound.module';
+import {
+  COMPOUND_SOURCE_PLUGIN,
+  CompoundSourceModule,
+  createReconcileLogger,
+} from './compound.module';
 
 vi.mock('@libs/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@libs/db')>();
@@ -51,6 +56,41 @@ describe('CompoundSourceModule', () => {
       imports: [CompoundSourceModule],
     }).compile();
     expect(moduleRef).toBeDefined();
+  });
+
+  it('exports zero-valued repair series before the first repair', async () => {
+    await Test.createTestingModule({ imports: [CompoundSourceModule] }).compile();
+    const metrics = await renderMetrics();
+    const series = metrics
+      .split('\n')
+      .filter((line) => line.includes('_compound_archive_audit_events_repaired_total{'));
+    expect(series).toHaveLength(45);
+    expect(series.every((line) => /\}\s+0(?:\s|$)/.test(line))).toBe(true);
+  });
+
+  it('emits repair details as a single JSON log record', () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    let output: string;
+    try {
+      createReconcileLogger().info('compound_archive_event_repaired', {
+        proposal_id: '615',
+        missing_store: 'both',
+        log_index: 0,
+      });
+      expect(write).toHaveBeenCalledTimes(1);
+      output = String(write.mock.calls[0]?.[0]);
+    } finally {
+      write.mockRestore();
+    }
+    expect(JSON.parse(output)).toMatchObject({
+      context: 'CompoundReconcile',
+      message: {
+        event: 'compound_archive_event_repaired',
+        proposal_id: '615',
+        missing_store: 'both',
+        log_index: 0,
+      },
+    });
   });
 
   it('M2/M3/M4 exposes expected plugins including compound_comp_token', async () => {

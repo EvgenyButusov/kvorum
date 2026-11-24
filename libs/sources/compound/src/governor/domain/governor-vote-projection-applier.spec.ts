@@ -68,6 +68,7 @@ function mutable(applier: GovernorVoteProjectionApplier): MutableVoteApplier {
 
 function buildApplier(options?: { payloads?: GovernorArchivePayloadRow[]; chainCtx?: unknown }) {
   const archive: GovernorVoteProjectionApplierDeps['archive'] = {
+    markHeld: vi.fn().mockResolvedValue(undefined),
     incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
     markDerived: vi.fn().mockResolvedValue(undefined),
   } as unknown as GovernorVoteProjectionApplierDeps['archive'];
@@ -208,7 +209,7 @@ describe('GovernorVoteProjectionApplier', () => {
     );
   });
 
-  it('fails with no_proposal and increments attempts', async () => {
+  it('fails when dao source cannot be resolved', async () => {
     const { applier, archive, metrics } = buildApplier();
     const repositories: TestRepositories = {
       proposals: {
@@ -415,7 +416,7 @@ describe('GovernorVoteProjectionApplier', () => {
     expect(metrics.processed).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'derived' }));
   });
 
-  it('fails with no_proposal when findBySource returns undefined', async () => {
+  it('holds votes without exhausting retries when their proposal is not derived yet', async () => {
     const { applier, archive, metrics, proposals } = buildApplier();
 
     (proposals.findDaoIdForSource as ReturnType<typeof vi.fn>).mockResolvedValue('dao-1');
@@ -423,9 +424,11 @@ describe('GovernorVoteProjectionApplier', () => {
 
     await applier.applyBatch([BASE_ROW]);
 
-    expect(archive.incrementAttemptCount).toHaveBeenCalledWith(BASE_ROW.id);
+    expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
+    expect(archive.markHeld).toHaveBeenCalledWith(BASE_ROW.id, expect.any(Date));
+    expect(archive.markDerived).not.toHaveBeenCalled();
     expect(metrics.processed).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: 'failed', reason: 'no_proposal' }),
+      expect.objectContaining({ outcome: 'held', reason: 'no_proposal' }),
     );
   });
 
