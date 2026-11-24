@@ -298,7 +298,7 @@ describeIf('compound vote derivation integration', () => {
     ).toHaveLength(1);
   }, 30_000);
 
-  it('routes no_proposal failure to vote_projection_stage at threshold', async () => {
+  it('holds a missing-parent vote without exhausting attempts, then derives it when the proposal arrives', async () => {
     await seedConfirmedVoteCast({ txN: 2, proposalId: '404' });
     await pgDb
       .updateTable('archive_event')
@@ -313,7 +313,54 @@ describeIf('compound vote derivation integration', () => {
       .selectAll()
       .where('archive_tx_hash', '=', numberedHash(2))
       .execute();
-    expect(dlqRows.length).toBeGreaterThanOrEqual(1);
-    expect(dlqRows[0]!.stage).toBe('vote_projection_stage');
+    expect(dlqRows).toHaveLength(0);
+    const held = await pgDb
+      .selectFrom('archive_event')
+      .select(['derived_at', 'derivation_attempt_count', 'derivation_hold_until'])
+      .where('tx_hash', '=', numberedHash(2))
+      .executeTakeFirstOrThrow();
+    expect(held.derived_at).toBeNull();
+    expect(held.derivation_attempt_count).toBe(4);
+    expect(held.derivation_hold_until).not.toBeNull();
+    expect(new Date(held.derivation_hold_until!).getTime()).toBeGreaterThan(Date.now());
+
+    const proposal = await pgDb
+      .insertInto('proposal')
+      .values({
+        dao_id: daoId,
+        source_type: SOURCE_TYPE,
+        source_id: '404',
+        proposer_actor_id: proposerActorId,
+        title: 'Delayed proposal',
+        description: 'desc',
+        description_hash: 'b'.repeat(64),
+        binding: true,
+        state: 'pending',
+        state_updated_at: new Date(),
+        updated_at: new Date(),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    // Simulate the hold expiring without a wall-clock delay.
+    await pgDb
+      .updateTable('archive_event')
+      .set({ derivation_hold_until: new Date(0) })
+      .where('tx_hash', '=', numberedHash(2))
+      .execute();
+    await applier.applyBatch(await archive.findUnderived([EVENT_TYPE], 50));
+    const derived = await pgDb
+      .selectFrom('archive_event')
+      .select('derived_at')
+      .where('tx_hash', '=', numberedHash(2))
+      .executeTakeFirstOrThrow();
+    expect(derived.derived_at).not.toBeNull();
+    const votes = await chDb
+      .selectFrom('vote_events_projection')
+      .selectAll()
+      .where('proposal_id', '=', proposal.id)
+      .where('superseded', '=', 0)
+      .execute();
+    expect(votes).toHaveLength(1);
+    expect(votes[0]!.voting_power).toBe('123');
   }, 30_000);
 });
