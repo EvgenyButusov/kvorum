@@ -1,4 +1,5 @@
 import { decodeLogEvent, type LogEvent, type Logger } from '@libs/chain';
+import { minBigInt, maxBigInt } from '@libs/utils';
 import type { ReconcileDriverMetrics, ReconcileRpcClient } from '@sources/core';
 import { decodeCompoundLog } from '../abi/decoder';
 import { interfaceForSource } from '../abi/events';
@@ -34,12 +35,6 @@ export interface ArchiveRepairLabels {
   missing_store: 'postgres' | 'clickhouse' | 'both';
 }
 
-function min(a: bigint, b: bigint): bigint {
-  return a < b ? a : b;
-}
-function max(a: bigint, b: bigint): bigint {
-  return a > b ? a : b;
-}
 function hex(block: bigint): string {
   return '0x' + block.toString(16);
 }
@@ -78,22 +73,26 @@ export class CompoundArchiveReconciler {
       }
       const floor = BigInt(source.active_from_block);
       const liveBound = BigInt(source.poll_cursor_block) - AUDIT_DELAY_BLOCKS;
-      let target = min(input.confirmedHead, liveBound);
-      if (source.active_to_block !== null) target = min(target, BigInt(source.active_to_block));
+      let target = minBigInt(input.confirmedHead, liveBound);
+      if (source.active_to_block !== null)
+        target = minBigInt(target, BigInt(source.active_to_block));
       if (target < floor) return;
       if (source.last_checked_block === null) {
         // A bounded initial historical audit. Subsequent ticks resume durably,
         // including following prolonged downtime or interrupted repairs.
-        await repository.initialize(source.id, max(floor - 1n, target - INITIAL_LOOKBACK_BLOCKS));
+        await repository.initialize(
+          source.id,
+          maxBigInt(floor - 1n, target - INITIAL_LOOKBACK_BLOCKS),
+        );
         source = await repository.findSource(input.reconcileSourceId, this.sourceType);
         if (!source || source.last_checked_block === null) return;
       }
       let cursor = BigInt(source.last_checked_block);
-      this.deps.recordLag?.(this.sourceType, Number(max(0n, target - cursor)));
-      const end = min(target, max(cursor, floor - 1n) + MAX_BLOCKS_PER_TICK);
+      this.deps.recordLag?.(this.sourceType, Number(maxBigInt(0n, target - cursor)));
+      const end = minBigInt(target, maxBigInt(cursor, floor - 1n) + MAX_BLOCKS_PER_TICK);
       while (cursor < end) {
-        const from = max(cursor + 1n, floor);
-        const to = min(end, from + CHUNK_BLOCKS - 1n);
+        const from = maxBigInt(cursor + 1n, floor);
+        const to = minBigInt(end, from + CHUNK_BLOCKS - 1n);
         if (from > to) return;
         const repaired = await this.auditChunk({
           sourceId: source.id,
@@ -105,7 +104,7 @@ export class CompoundArchiveReconciler {
         });
         if (!(await repository.advance(source.id, cursor, to))) return;
         cursor = to;
-        this.deps.recordLag?.(this.sourceType, Number(max(0n, target - cursor)));
+        this.deps.recordLag?.(this.sourceType, Number(maxBigInt(0n, target - cursor)));
         this.deps.metrics.recordOutcome({
           source_type: this.sourceType,
           outcome: repaired > 0 ? 'archive_repaired' : 'archive_verified',

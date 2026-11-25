@@ -97,6 +97,6 @@ export class CompoundArchiveReconcileRepository {
       .where('dao_source_id', '=', daoSourceId)
       .where('last_checked_block', '=', previous.toString())
       .executeTakeFirst();
-    return Number(result?.numUpdatedRows ?? 0n) === 1;
+    return result.numUpdatedRows === 1n;
   }
 }
