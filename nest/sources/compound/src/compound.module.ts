@@ -1,5 +1,5 @@
-import { Module, Logger, ConsoleLogger } from '@nestjs/common';
-import { ChainContextRegistry, type Logger as ChainLogger } from '@libs/chain';
+import { Module, Logger } from '@nestjs/common';
+import { ChainContextRegistry } from '@libs/chain';
 import {
   ArchiveEventRepository,
   ArchiveDerivationRepository,
@@ -35,6 +35,7 @@ import type { SourcePlugin } from '@sources/core';
 import { ChainContextModule } from '@nest/chain';
 import { toChainLogger } from '@nest/chain';
 import { DbModule } from '@nest/db';
+import { createReconcileLogger } from './reconcile-logger';
 import { buildDriverMetrics } from '../../reconcile-metrics';
 
 export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
@@ -46,26 +47,6 @@ const archiveEventsRepaired = defineCounter({
   name: 'compound_archive_audit_events_repaired',
   description: 'Individual missing Compound events restored and verified in both archives',
 });
-
-// The indexer uses Nest's text console logger by default. Emit single-line JSON
-// for reconciliation so operators can reliably query event identity and values.
-export function createReconcileLogger(): ChainLogger {
-  const logger = new ConsoleLogger('CompoundReconcile', {
-    json: true,
-    colors: false,
-    compact: true,
-  });
-  const message = (event: string, details: unknown) => ({
-    ...(details && typeof details === 'object' ? details : {}),
-    event,
-  });
-  return {
-    info: (event, details) => logger.log(message(event, details)),
-    warn: (event, details) => logger.warn(message(event, details)),
-    error: (event, details) => logger.error(message(event, details)),
-    debug: (event, details) => logger.debug(message(event, details)),
-  };
-}
 
 @Module({
   imports: [
