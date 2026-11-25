@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderMetrics } from '@libs/observability';
-import { buildArchiveAuditMetrics } from './compound-metrics';
+import { buildArchiveAuditMetrics } from './metrics';
 
 describe('Compound archive audit metrics', () => {
   it('initializes repair series, records lag and counts each repair without resetting on reinitialization', async () => {

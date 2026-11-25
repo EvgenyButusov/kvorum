@@ -34,7 +34,7 @@ import type { SourcePlugin } from '@sources/core';
 import { ChainContextModule } from '@nest/chain';
 import { toChainLogger } from '@nest/chain';
 import { DbModule } from '@nest/db';
-import { buildArchiveAuditMetrics } from './compound-metrics';
+import { buildArchiveAuditMetrics } from './metrics';
 import { createReconcileLogger } from './reconcile-logger';
 import { buildDriverMetrics } from '../../reconcile-metrics';
 
