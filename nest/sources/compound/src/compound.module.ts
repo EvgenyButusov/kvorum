@@ -34,8 +34,7 @@ import type { SourcePlugin } from '@sources/core';
 import { ChainContextModule } from '@nest/chain';
 import { toChainLogger } from '@nest/chain';
 import { DbModule } from '@nest/db';
-import { buildArchiveAuditMetrics } from './metrics';
-import { createReconcileLogger } from './reconcile-logger';
+import { createReconcileLogger } from './compound-reconcile-logger';
 import { buildDriverMetrics } from '../../reconcile-metrics';
 
 export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
@@ -172,10 +171,19 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
       ): SourcePlugin => {
         const governorPayloads = new GovernorArchivePayloadRepository(chDb);
         const compTokenPayloads = new CompTokenArchivePayloadRepository(chDb);
-        const reconcileLogger = createReconcileLogger();
+        const reconcileLogger = createReconcileLogger('CompoundReconcile');
         const metrics = buildDriverMetrics();
         const archiveRepository = new CompoundArchiveReconcileRepository(pgDb, chDb);
-        const { recordArchiveAuditLag, recordArchiveRepair } = buildArchiveAuditMetrics();
+        // One shared literal: the three governor variants differ only by factory, so a dependency
+        // added to two of three cannot drift apart.
+        const reconcileDeps = {
+          archiveRepository,
+          archiveWriter,
+          proposals: proposalRepo,
+          proposalRepo: sharedProposalRepo,
+          metrics,
+          logger: reconcileLogger,
+        };
         const logger = new Logger('CompoundSourceModule');
         logger.log('compound_comp_token plugin registered');
 
@@ -192,36 +200,9 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
               dlqRepo,
               logger: toChainLogger(new Logger('CompTokenIngester')),
             }),
-            createCompoundGovernorBravoReconcilePlugin({
-              archiveRepository,
-              archiveWriter,
-              recordArchiveAuditLag,
-              recordArchiveRepair,
-              proposals: proposalRepo,
-              proposalRepo: sharedProposalRepo,
-              metrics,
-              logger: reconcileLogger,
-            }),
-            createCompoundGovernorOzReconcilePlugin({
-              archiveRepository,
-              archiveWriter,
-              recordArchiveAuditLag,
-              recordArchiveRepair,
-              proposals: proposalRepo,
-              proposalRepo: sharedProposalRepo,
-              metrics,
-              logger: reconcileLogger,
-            }),
-            createCompoundGovernorAlphaReconcilePlugin({
-              archiveRepository,
-              archiveWriter,
-              recordArchiveAuditLag,
-              recordArchiveRepair,
-              proposals: proposalRepo,
-              proposalRepo: sharedProposalRepo,
-              metrics,
-              logger: reconcileLogger,
-            }),
+            createCompoundGovernorBravoReconcilePlugin(reconcileDeps),
+            createCompoundGovernorOzReconcilePlugin(reconcileDeps),
+            createCompoundGovernorAlphaReconcilePlugin(reconcileDeps),
           ],
           derivers: [
             projectionApplier,

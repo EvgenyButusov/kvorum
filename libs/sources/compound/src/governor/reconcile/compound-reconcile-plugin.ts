@@ -6,7 +6,7 @@ import {
   type ReconcileDriverMetrics,
   type SourceIngester,
 } from '@sources/core';
-import { CompoundArchiveReconciler, type ArchiveRepairLabels } from './compound-archive-reconciler';
+import { CompoundArchiveReconciler } from './compound-archive-reconciler';
 import { CompoundStateReconciler } from './compound-state-reconciler';
 import type { GovernorArchiveWriter } from '../ingestion/archive-writer';
 import type { CompoundArchiveReconcileRepository } from '../persistence/compound-archive-reconcile-repository';
@@ -18,8 +18,6 @@ export interface CompoundReconcilePluginDeps {
   proposalRepo: ProposalRepository;
   archiveRepository: CompoundArchiveReconcileRepository;
   archiveWriter: GovernorArchiveWriter;
-  recordArchiveAuditLag?: (sourceType: string, blocks: number) => void;
-  recordArchiveRepair?: (labels: ArchiveRepairLabels) => void;
   metrics: ReconcileDriverMetrics;
   logger: Logger;
 }
@@ -46,8 +44,6 @@ function createReconcilePlugin(
       writer: deps.archiveWriter,
       metrics: deps.metrics,
       logger: deps.logger,
-      recordLag: deps.recordArchiveAuditLag,
-      recordRepair: deps.recordArchiveRepair,
     },
     targetSourceType,
   );

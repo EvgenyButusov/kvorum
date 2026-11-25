@@ -62,7 +62,7 @@ describe('CompoundArchiveReconcileRepository', () => {
       'inner join "dao_source" as "source" on "source"."dao_id" = "reconcile"."dao_id" and "source"."chain_id" = "reconcile"."chain_id"',
     );
     expect(query.sql).toContain(
-      'left join "compound_archive_reconcile_cursor" as "cursor" on "cursor"."dao_source_id" = "source"."id"',
+      'left join "archive_reconcile_cursor" as "cursor" on "cursor"."dao_source_id" = "source"."id"',
     );
     expect(query.sql).toContain("source.source_config ->> 'governor_address'");
     expect(query.sql).toContain(
@@ -127,7 +127,7 @@ describe('CompoundArchiveReconcileRepository', () => {
     await repo.initialize(sourceId, 9007199254740993n);
     const query = pg.execute.mock.calls[0]![0];
     expect(query.sql).toBe(
-      'insert into "compound_archive_reconcile_cursor" ("dao_source_id", "last_checked_block") values ($1, $2) on conflict ("dao_source_id") do nothing',
+      'insert into "archive_reconcile_cursor" ("dao_source_id", "last_checked_block") values ($1, $2) on conflict ("dao_source_id") do nothing',
     );
     expect(query.parameters).toEqual([sourceId, '9007199254740993']);
   });
@@ -146,7 +146,7 @@ describe('CompoundArchiveReconcileRepository', () => {
       );
       const query = pg.execute.mock.calls[0]![0];
       expect(query.sql).toBe(
-        'update "compound_archive_reconcile_cursor" set "last_checked_block" = $1 where "dao_source_id" = $2 and "last_checked_block" = $3',
+        'update "archive_reconcile_cursor" set "last_checked_block" = $1 where "dao_source_id" = $2 and "last_checked_block" = $3',
       );
       expect(query.parameters).toEqual(['9007199254740995', sourceId, '9007199254740993']);
     },

@@ -1,5 +1,4 @@
 export { COMPOUND_PROPOSAL_CHOICES } from './proposal-choices';
-export { CompoundArchiveReconcileRepository } from './governor/persistence/compound-archive-reconcile-repository';
 export { compoundReadExtension } from './api';
 export { loadAbiLibrary } from './calldata/abi-library';
 export type { LoadedAbiLibrary, AbiEntry } from './calldata/abi-library';
@@ -33,6 +32,7 @@ export type {
   EventArchiveCompoundGovernorBravoTable,
   NewEventArchiveCompoundGovernorBravo,
 } from './governor/index';
+export { CompoundArchiveReconcileRepository } from './governor/index';
 // Re-export the COMP token CH table type so @sources/compound is the canonical import point.
 export type {
   EventArchiveCompoundCompToken,

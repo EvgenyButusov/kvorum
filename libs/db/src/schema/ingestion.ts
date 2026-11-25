@@ -105,3 +105,13 @@ export interface OffChainCursorTable {
 export type OffChainCursor = Selectable<OffChainCursorTable>;
 export type NewOffChainCursor = Insertable<OffChainCursorTable>;
 export type OffChainCursorUpdate = Updateable<OffChainCursorTable>;
+
+/** Archive-completeness audit watermark, one row per dao_source. Independent of the ingestion and
+ *  backfill cursors: the audit re-reads confirmed logs behind them and must never move them. */
+export interface ArchiveReconcileCursorTable {
+  dao_source_id: string;
+  last_checked_block: string;
+}
+
+export type ArchiveReconcileCursor = Selectable<ArchiveReconcileCursorTable>;
+export type NewArchiveReconcileCursor = Insertable<ArchiveReconcileCursorTable>;

@@ -292,7 +292,7 @@
     },
     {
       "id": 11,
-      "title": "Compound archive audit lag (blocks)",
+      "title": "Archive audit lag (blocks)",
       "description": "Remaining blocks behind the safe audit target. Persistent lag indicates reconciliation is stalled.",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -306,14 +306,14 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "max by (source_type) (indexer_compound_archive_audit_lag_blocks)",
+          "expr": "max by (source_type) (indexer_archive_audit_lag_blocks)",
           "legendFormat": "{{source_type}}"
         }
       ]
     },
     {
       "id": 12,
-      "title": "Compound archive audit chunk outcomes (1h)",
+      "title": "Archive audit chunk outcomes (1h)",
       "description": "Audit chunks requiring repair or failing verification; investigate repeated failures.",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -361,7 +361,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum(increase(indexer_compound_archive_audit_events_repaired_total[24h]))",
+          "expr": "sum(increase(indexer_archive_audit_events_repaired_total[24h])) or vector(0)",
           "instant": true
         }
       ]
@@ -388,7 +388,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum by (source_type, event_type, missing_store) (increase(indexer_compound_archive_audit_events_repaired_total[24h])) > 0",
+          "expr": "sum by (source_type, event_type, missing_store) (increase(indexer_archive_audit_events_repaired_total[24h])) > 0",
           "legendFormat": "{{source_type}} / {{event_type}} / {{missing_store}}"
         }
       ]

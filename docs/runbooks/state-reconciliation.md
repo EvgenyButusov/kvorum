@@ -10,18 +10,18 @@ This runbook covers operation and validation of the indexer state reconciler for
 
 ## Archive completeness reconciliation (issue #725)
 
-Apply migration `compound_005_archive_reconcile_cursor` before deploying the updated indexer. It adds a per-source durable audit cursor and a partial range index on the PostgreSQL archive.
+Apply migrations `0017_archive_reconcile_cursor` (the per-source durable audit cursor, shared by every source) and `compound_005_archive_reconcile_index` (a partial range index over the governor archive rows) before deploying the updated indexer.
 
 The existing Compound reconcile head listeners audit both PostgreSQL and ClickHouse against `eth_getLogs` for the original governor source. The worker audits only through the lesser of the confirmed head, the source's persisted live cursor minus 600 blocks (roughly two hours on Ethereum), and its configured end block. On its first run, it checks up to the preceding 50,000 blocks within the source's active range; thereafter it resumes from the independent durable checkpoint. Each tick processes at most 10,000 blocks in 2,000-block chunks. It restores missing events through the normal archive writer and checks both stores again before checkpointing. Missing events are projected by the ordinary indexer. Failed writes, malformed RPC logs, and missing readback leave the audit cursor unchanged; a later tick retries. It does not change the live or backfill cursor.
 
-Monitor the `indexer_compound_archive_audit_lag_blocks` gauge (normally near zero after the initial backlog drains), and the `indexer_state_reconcile_total` counter outcomes `archive_verified`, `archive_repaired`, and `archive_audit_failed`. Both have panels in the Platform Health dashboard. Investigate persistent lag or repeated failures; a stalled or absent live cursor also requires investigation. The failure log is `compound_archive_audit_failed`. Repairs log `compound_archive_repaired` with the audited block interval and recovered count.
+Monitor the `indexer_archive_audit_lag_blocks` gauge (normally near zero after the initial backlog drains), and the `indexer_state_reconcile_total` counter outcomes `archive_verified`, `archive_repaired`, and `archive_audit_failed`. Both have panels in the Platform Health dashboard. Investigate persistent lag or repeated failures; a stalled or absent live cursor also requires investigation. The failure log is `compound_archive_audit_failed`. Repairs log `compound_archive_repaired` with the audited block interval and recovered count.
 
 ### Repair volume KPI: north star = 0
 
-Use `indexer_compound_archive_audit_events_repaired_total` to count individual verified repairs (one logical event even if both stores were missing it). The low-cardinality labels are `source_type`, `event_type`, and `missing_store` (`postgres`, `clickhouse`, or `both`). Grafana displays rolling 24-hour volume and breakdown; the target is **zero after the initial historical catch-up**. Prometheus counters are process-local and `increase` estimates the count across scrape intervals and restarts; use structured logs for individual identities. Always interpret zero together with audit lag, verification progress, and failure outcomes — an inactive audit is not healthy.
+Use `indexer_archive_audit_events_repaired_total` to count individual verified repairs (one logical event even if both stores were missing it). The low-cardinality labels are `source_type`, `event_type`, and `missing_store` (`postgres`, `clickhouse`, or `both`). Grafana displays rolling 24-hour volume and breakdown; the target is **zero after the initial historical catch-up**. Prometheus counters are process-local and `increase` estimates the count across scrape intervals and restarts; use structured logs for individual identities. Always interpret zero together with audit lag, verification progress, and failure outcomes — an inactive audit is not healthy.
 
 ```promql
-sum(increase(indexer_compound_archive_audit_events_repaired_total[24h]))
+sum(increase(indexer_archive_audit_events_repaired_total[24h])) or vector(0)
 ```
 
 Each missing event produces `compound_archive_repair_started` followed by either `compound_archive_event_repaired` (after both stores are verified) or `compound_archive_repair_failed`. Logs include source, chain, governor, proposal ID, block and transaction hashes, log index, missing store, and relevant decoded vote or lifecycle values. Full proposal descriptions, calldata, and free-text vote reasons are deliberately omitted; the canonical event identity allows them to be retrieved when needed. Verified events are counted before the next event or checkpoint so a later failure does not erase partial progress. A crash between persistence and telemetry emission can still lose a metric increment; the start record identifies the interrupted repair for triage.
@@ -32,7 +32,7 @@ For each nonzero repair count, inspect the per-event logs and correlate the sour
 SELECT s.source_type, s.poll_cursor_block, c.last_checked_block,
        s.poll_cursor_block - 600 - c.last_checked_block AS blocks_behind_safe_cursor
 FROM dao_source s
-LEFT JOIN compound_archive_reconcile_cursor c ON c.dao_source_id = s.id
+LEFT JOIN archive_reconcile_cursor c ON c.dao_source_id = s.id
 WHERE s.source_type IN ('compound_governor_alpha', 'compound_governor_bravo', 'compound_governor_oz');
 ```
 

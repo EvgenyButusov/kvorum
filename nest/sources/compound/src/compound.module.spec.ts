@@ -1,7 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderMetrics } from '@libs/observability';
 import { COMP_TOKEN_ADDRESS } from '@sources/compound';
 import type { SourcePlugin } from '@sources/core';
 import { COMPOUND_SOURCE_PLUGIN, CompoundSourceModule } from './compound.module';
@@ -52,16 +51,6 @@ describe('CompoundSourceModule', () => {
       imports: [CompoundSourceModule],
     }).compile();
     expect(moduleRef).toBeDefined();
-  });
-
-  it('exports zero-valued repair series before the first repair', async () => {
-    await Test.createTestingModule({ imports: [CompoundSourceModule] }).compile();
-    const metrics = await renderMetrics();
-    const series = metrics
-      .split('\n')
-      .filter((line) => line.includes('_compound_archive_audit_events_repaired_total{'));
-    expect(series).toHaveLength(45);
-    expect(series.every((line) => /\}\s+0(?:\s|$)/.test(line))).toBe(true);
   });
 
   it('M2/M3/M4 exposes expected plugins including compound_comp_token', async () => {

@@ -47,8 +47,8 @@ function setup() {
     readIdentities: vi.fn().mockResolvedValue({ pg: [identity], ch: [identity] }),
   };
   const writer = { writeCore: vi.fn().mockResolvedValue(undefined) };
-  const metrics = { recordOutcome: vi.fn() };
   const recordRepair = vi.fn();
+  const metrics = { recordOutcome: vi.fn(), recordArchiveRepair: recordRepair };
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const client = {
     send: vi
@@ -56,7 +56,7 @@ function setup() {
       .mockImplementation(async (method: string) => (method === 'eth_getLogs' ? [raw] : { hash })),
   };
   const audit = new CompoundArchiveReconciler(
-    { repository, writer, metrics, logger, recordRepair },
+    { repository, writer, metrics, logger },
     'compound_governor_oz',
   );
   const run = (confirmedHead = 2000n) =>

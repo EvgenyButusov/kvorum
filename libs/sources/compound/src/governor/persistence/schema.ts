@@ -27,11 +27,6 @@ export interface CompoundProposalMetaTable {
   last_reconcile_check_block: string | null;
 }
 
-export interface CompoundArchiveReconcileCursorTable {
-  dao_source_id: string;
-  last_checked_block: string;
-}
-
 // Extend @libs/db interfaces with compound-specific tables.
 // Any compilation that transitively imports this file gets type-safe db access.
 declare module '@libs/db' {
@@ -41,6 +36,5 @@ declare module '@libs/db' {
 
   interface PgDatabase {
     compound_proposal_meta: CompoundProposalMetaTable;
-    compound_archive_reconcile_cursor: CompoundArchiveReconcileCursorTable;
   }
 }

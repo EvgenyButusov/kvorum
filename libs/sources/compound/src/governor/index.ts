@@ -78,6 +78,11 @@ export type {
   ReconcileStateInput,
 } from './persistence/compound-proposal-repository';
 export { CompoundProposalRepository } from './persistence/compound-proposal-repository';
+export type {
+  ArchiveIdentity,
+  ArchiveReconcileSource,
+} from './persistence/compound-archive-reconcile-repository';
+export { CompoundArchiveReconcileRepository } from './persistence/compound-archive-reconcile-repository';
 
 export type {
   GovernorEventData,

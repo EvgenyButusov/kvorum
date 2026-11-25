@@ -1,12 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createReconcileLogger } from './reconcile-logger';
+import { createReconcileLogger } from './compound-reconcile-logger';
 
 describe('createReconcileLogger', () => {
   it('emits repair details as a single JSON log record', () => {
     const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     let output: string;
     try {
-      createReconcileLogger().info('compound_archive_event_repaired', {
+      createReconcileLogger('CompoundReconcile').info('compound_archive_event_repaired', {
         proposal_id: '615',
         missing_store: 'both',
         log_index: 0,

@@ -1,9 +1,12 @@
 import { decodeLogEvent, type LogEvent, type Logger } from '@libs/chain';
 import { minBigInt, maxBigInt } from '@libs/utils';
-import type { ReconcileDriverMetrics, ReconcileRpcClient } from '@sources/core';
+import type {
+  ArchiveRepairLabels,
+  ReconcileDriverMetrics,
+  ReconcileRpcClient,
+} from '@sources/core';
 import { decodeCompoundLog } from '../abi/decoder';
 import { interfaceForSource } from '../abi/events';
-import type { CompoundEventType } from '../abi/events';
 import type { GovernorArchiveWriter } from '../ingestion/archive-writer';
 import type {
   ArchiveIdentity,
@@ -23,16 +26,11 @@ interface ArchiveReconcilerDeps {
     'findSource' | 'initialize' | 'advance' | 'readIdentities'
   >;
   writer: Pick<GovernorArchiveWriter, 'writeCore'>;
-  metrics: Pick<ReconcileDriverMetrics, 'recordOutcome'>;
+  metrics: Pick<
+    ReconcileDriverMetrics,
+    'recordOutcome' | 'recordArchiveAuditLag' | 'recordArchiveRepair'
+  >;
   logger: Logger;
-  recordLag?: (sourceType: string, blocks: number) => void;
-  recordRepair?: (labels: ArchiveRepairLabels) => void;
-}
-
-export interface ArchiveRepairLabels {
-  source_type: string;
-  event_type: CompoundEventType;
-  missing_store: 'postgres' | 'clickhouse' | 'both';
 }
 
 function hex(block: bigint): string {
@@ -88,7 +86,10 @@ export class CompoundArchiveReconciler {
         if (!source || source.last_checked_block === null) return;
       }
       let cursor = BigInt(source.last_checked_block);
-      this.deps.recordLag?.(this.sourceType, Number(maxBigInt(0n, target - cursor)));
+      this.deps.metrics.recordArchiveAuditLag?.(
+        this.sourceType,
+        Number(maxBigInt(0n, target - cursor)),
+      );
       const end = minBigInt(target, maxBigInt(cursor, floor - 1n) + MAX_BLOCKS_PER_TICK);
       while (cursor < end) {
         const from = maxBigInt(cursor + 1n, floor);
@@ -104,7 +105,10 @@ export class CompoundArchiveReconciler {
         });
         if (!(await repository.advance(source.id, cursor, to))) return;
         cursor = to;
-        this.deps.recordLag?.(this.sourceType, Number(maxBigInt(0n, target - cursor)));
+        this.deps.metrics.recordArchiveAuditLag?.(
+          this.sourceType,
+          Number(maxBigInt(0n, target - cursor)),
+        );
         this.deps.metrics.recordOutcome({
           source_type: this.sourceType,
           outcome: repaired > 0 ? 'archive_repaired' : 'archive_verified',
@@ -274,7 +278,7 @@ export class CompoundArchiveReconciler {
         throw error;
       }
       repaired++;
-      this.deps.recordRepair?.(labels);
+      this.deps.metrics.recordArchiveRepair?.(labels);
       this.deps.logger.info('compound_archive_event_repaired', details);
     }
     return repaired;

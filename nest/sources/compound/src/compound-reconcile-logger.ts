@@ -3,8 +3,8 @@ import type { Logger } from '@libs/chain';
 
 // The indexer uses Nest's text console logger by default. Emit single-line JSON
 // for reconciliation so operators can reliably query event identity and values.
-export function createReconcileLogger(): Logger {
-  const logger = new ConsoleLogger('CompoundReconcile', {
+export function createReconcileLogger(context: string): Logger {
+  const logger = new ConsoleLogger(context, {
     json: true,
     colors: false,
     compact: true,

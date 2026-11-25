@@ -19,9 +19,9 @@ import {
 } from '../migrations-postgres/compound_004_alpha_reconcile';
 import { COMP_TOKEN_ADDRESS, COMP_TOKEN_DEPLOY_BLOCK } from './comp-token/constants';
 import {
-  up as upArchiveCursor,
-  down as downArchiveCursor,
-} from '../migrations-postgres/compound_005_archive_reconcile_cursor';
+  up as upArchiveIndex,
+  down as downArchiveIndex,
+} from '../migrations-postgres/compound_005_archive_reconcile_index';
 
 // Sentinel thrown inside transaction to trigger intentional rollback.
 class RollbackSignal extends Error {}
@@ -80,11 +80,11 @@ describe('compound migrations smoke (mocked db)', () => {
     expect(db._executeQuery).toHaveBeenCalled();
   });
 
-  it('compound_005 archive reconcile cursor can be migrated up and down', async () => {
+  it('compound_005 archive range index can be migrated up and down', async () => {
     const db = makeMockDb();
-    await upArchiveCursor(db);
-    await downArchiveCursor(db);
-    expect(db._executeQuery).toHaveBeenCalledTimes(4);
+    await upArchiveIndex(db);
+    await downArchiveIndex(db);
+    expect(db._executeQuery).toHaveBeenCalledTimes(2);
   });
 });
 

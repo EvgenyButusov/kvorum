@@ -36,7 +36,7 @@ export class CompoundArchiveReconcileRepository {
           .onRef('source.dao_id', '=', 'reconcile.dao_id')
           .onRef('source.chain_id', '=', 'reconcile.chain_id'),
       )
-      .leftJoin('compound_archive_reconcile_cursor as cursor', 'cursor.dao_source_id', 'source.id')
+      .leftJoin('archive_reconcile_cursor as cursor', 'cursor.dao_source_id', 'source.id')
       .select([
         'source.id',
         sql<string>`source.source_config ->> 'governor_address'`.as('governor_address'),
@@ -64,6 +64,9 @@ export class CompoundArchiveReconcileRepository {
       this.pg
         .selectFrom('archive_event')
         .select(columns)
+        // Inlined literals, not a parameterised IN: idx_compound_archive_reconcile_range is a
+        // partial index, and Postgres can only prove a qualifier implies its predicate from
+        // constants. Parameters would plan a full scan of archive_event.
         .where(
           sql<boolean>`source_type IN ('compound_governor_alpha', 'compound_governor_bravo', 'compound_governor_oz')`,
         )
@@ -84,7 +87,7 @@ export class CompoundArchiveReconcileRepository {
 
   async initialize(daoSourceId: string, block: bigint): Promise<void> {
     await this.pg
-      .insertInto('compound_archive_reconcile_cursor')
+      .insertInto('archive_reconcile_cursor')
       .values({ dao_source_id: daoSourceId, last_checked_block: block.toString() })
       .onConflict((oc) => oc.column('dao_source_id').doNothing())
       .execute();
@@ -92,7 +95,7 @@ export class CompoundArchiveReconcileRepository {
 
   async advance(daoSourceId: string, previous: bigint, next: bigint): Promise<boolean> {
     const result = await this.pg
-      .updateTable('compound_archive_reconcile_cursor')
+      .updateTable('archive_reconcile_cursor')
       .set({ last_checked_block: next.toString() })
       .where('dao_source_id', '=', daoSourceId)
       .where('last_checked_block', '=', previous.toString())
