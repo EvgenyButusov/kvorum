@@ -399,7 +399,9 @@ describe('GovernorProjectionApplier', () => {
       });
       const before = Date.now();
 
-      await applier.applyBatch([{ ...ROW, event_type: eventType }]);
+      await applier.applyBatch([
+        { ...ROW, event_type: eventType, received_at: new Date(before - 1_000) },
+      ]);
 
       expect(calls.heldUntil?.getTime()).toBeGreaterThan(before);
       expect(tx.updateTable).not.toHaveBeenCalledWith('proposal');
@@ -411,6 +413,32 @@ describe('GovernorProjectionApplier', () => {
       );
     },
   );
+
+  it('stops holding a lifecycle event whose creation is still absent past the bound', async () => {
+    const { pgDb, calls } = makeProjectionTx({ proposalExists: false });
+    const archive = { incrementAttemptCount: vi.fn() };
+    const metrics = makeMetrics();
+    const applier = makeApplier({
+      pgDb: pgDb as never,
+      chDb: {} as never,
+      archive: archive as never,
+      payloads: { fetchPayloads: vi.fn().mockResolvedValue([QUEUED_PAYLOAD]) } as never,
+      metrics,
+    });
+
+    await applier.applyBatch([
+      {
+        ...ROW,
+        event_type: 'ProposalQueued',
+        received_at: new Date(Date.now() - 3 * 60 * 60 * 1000),
+      },
+    ]);
+
+    expect(calls.heldUntil).toBeUndefined();
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'failed', reason: 'no_proposal' }),
+    );
+  });
 
   it('increments attempt count when archive payload JSON cannot be decoded', async () => {
     const archive = {

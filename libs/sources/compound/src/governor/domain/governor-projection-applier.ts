@@ -10,6 +10,7 @@ import {
   type PgDatabase,
 } from '@libs/db';
 import { VoteBlockTimestampFetcher } from '@sources/core';
+import { decideMissingProposalHold } from './hold-policy';
 import { projectCompoundProposalEvent } from './proposal-projector';
 import type {
   CompoundGovernorEvent,
@@ -65,8 +66,6 @@ interface CompoundProjectionRepositories {
   archive: ArchiveDerivationRepository;
   actorResolution: ArchiveActorResolutionRepository;
 }
-
-const MISSING_PROPOSAL_HOLD_MS = 60_000;
 
 export class GovernorProjectionApplier {
   readonly kind = 'projection' as const;
@@ -215,8 +214,28 @@ export class GovernorProjectionApplier {
               sourceId: projection.sourceId,
             });
             if (proposal === undefined) {
-              await archive.markHeld(row.id, new Date(Date.now() + MISSING_PROPOSAL_HOLD_MS));
-              this.record(row, 'held', 'no_proposal');
+              const decision = decideMissingProposalHold(row.received_at);
+              if (decision.action === 'hold') {
+                await archive.markHeld(row.id, decision.until);
+                this.record(row, 'held', 'no_proposal');
+                return;
+              }
+              // No projection DLQ on this path, so the attempt count plus this log are what makes
+              // a permanently orphaned lifecycle event visible instead of retrying unseen.
+              await archive.incrementAttemptCount(row.id);
+              this.record(row, 'failed', 'no_proposal');
+              this.logger.error('compound_lifecycle_parent_absent', {
+                row_id: row.id,
+                source_type: row.source_type,
+                event_type: row.event_type,
+                chain_id: row.chain_id,
+                source_id: projection.sourceId,
+                block_hash: row.block_hash,
+                tx_hash: row.tx_hash,
+                log_index: row.log_index,
+                waited_ms: decision.waitedMs,
+                attempt: row.derivation_attempt_count + 1,
+              });
               return;
             }
             const advanced = await proposals.advanceState({

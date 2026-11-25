@@ -36,7 +36,7 @@ LEFT JOIN archive_reconcile_cursor c ON c.dao_source_id = s.id
 WHERE s.source_type IN ('compound_governor_alpha', 'compound_governor_bravo', 'compound_governor_oz');
 ```
 
-This is a rolling completeness check, not a full-history validation or a proof of RPC completeness. An RPC provider that silently omits the same event on both the original ingestion and the independent audit can still evade detection. Historical ranges preceding the initial audit window require a separately scoped canonical audit. Reorg cleanup remains the responsibility of the existing reorg pipeline. Projection rows whose parent proposal is not yet derived are held for retry rather than dropped or exhausted into the DLQ.
+This is a rolling completeness check, not a full-history validation or a proof of RPC completeness. An RPC provider that silently omits the same event on both the original ingestion and the independent audit can still evade detection. Historical ranges preceding the initial audit window require a separately scoped canonical audit. Reorg cleanup remains the responsibility of the existing reorg pipeline. Projection rows whose parent proposal is not yet derived are held for retry rather than dropped, but the hold is bounded — see below.
 
 ## Prerequisites
 
@@ -165,3 +165,37 @@ Watch logs/metrics for `state_reconcile_missed_event` (on-chain `executed|queued
 ## Optional manual SQL escape hatch
 
 Manual correction SQL is emergency-only and must be recorded in incident notes. Normal path is reconciler + backfill/event re-derivation.
+
+## Orphaned projection rows
+
+A vote or lifecycle event whose parent proposal has not derived yet is held, not failed: a catch-up
+can archive it before its creation. `ProposalCreated` precedes both in block order on one chain, so
+a parent still missing after `COMPOUND_MISSING_PROPOSAL_HOLD_MAX_MS` (default two hours, measured
+from `archive_event.received_at`) is an ingestion gap rather than ordering — which is long enough
+for the archive audit above to restore it on one of its ticks.
+
+Past the bound the row stops being held. A vote goes through the normal vote-projection failure
+path and is quarantined in `ingestion_dlq` once `VOTE_PROJECTION_DLQ_THRESHOLD` attempts are spent;
+inspect and retry it with the `dlq` commands. A lifecycle event has no projection DLQ, so it records
+a `failed` outcome with a rising `derivation_attempt_count` and logs
+`compound_lifecycle_parent_absent` with the event identity and how long it waited.
+
+The bound exists because `markHeld` leaves `derivation_attempt_count` untouched: without it, a
+permanently orphaned row retried every minute forever, reaching neither the DLQ nor any failure
+count. Currently held rows are visible in PostgreSQL:
+
+```sql
+SELECT source_type, event_type, chain_id, tx_hash, log_index, received_at,
+       derivation_hold_until, derivation_attempt_count
+FROM archive_event
+WHERE derivation_hold_until IS NOT NULL
+  AND derived_at IS NULL
+ORDER BY received_at
+LIMIT 50;
+```
+
+A row whose `received_at` is older than the bound and that is still listed here means the derivation
+worker is not reaching it — check the worker's lag and the projection DLQ before assuming the hold
+is at fault. Compound's projection appliers currently pass no-op outcome metrics, so `held` and
+`failed` counts are not on the Platform Health dashboard; the SQL above and the escalation logs are
+the authoritative view until those are wired (Aave's vote applier is the reference).

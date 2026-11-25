@@ -9,6 +9,7 @@ import {
   VoteEventsProjectionWriter,
 } from '@libs/db';
 import { VoteBlockTimestampFetcher, buildVoteRows, isNewerVote } from '@sources/core';
+import { decideMissingProposalHold } from './hold-policy';
 import type { VoteCastPayload } from './types';
 import {
   GovernorArchivePayloadRepository,
@@ -154,7 +155,16 @@ export class GovernorVoteProjectionApplier {
         sourceId: event.proposalId,
       });
       if (proposal === undefined) {
-        await this.archive.markHeld(row.id, new Date(Date.now() + 60_000));
+        const decision = decideMissingProposalHold(row.received_at);
+        if (decision.action === 'escalate') {
+          await this.failAndMaybeDlq(
+            row,
+            'no_proposal',
+            new Error(`parent proposal absent ${decision.waitedMs}ms after ingestion`),
+          );
+          return;
+        }
+        await this.archive.markHeld(row.id, decision.until);
         this.record(row, 'held', 'no_proposal');
         return;
       }

@@ -418,17 +418,52 @@ describe('GovernorVoteProjectionApplier', () => {
 
   it('holds votes without exhausting retries when their proposal is not derived yet', async () => {
     const { applier, archive, metrics, proposals } = buildApplier();
+    const justIngested = { ...BASE_ROW, received_at: new Date(Date.now() - 1_000) };
 
     (proposals.findDaoIdForSource as ReturnType<typeof vi.fn>).mockResolvedValue('dao-1');
     (proposals.findBySource as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
-    await applier.applyBatch([BASE_ROW]);
+    await applier.applyBatch([justIngested]);
 
     expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
     expect(archive.markHeld).toHaveBeenCalledWith(BASE_ROW.id, expect.any(Date));
     expect(archive.markDerived).not.toHaveBeenCalled();
     expect(metrics.processed).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: 'held', reason: 'no_proposal' }),
+    );
+  });
+
+  it('stops holding and fails a vote whose proposal is still absent past the bound', async () => {
+    const { applier, archive, metrics, proposals } = buildApplier();
+    const longOrphaned = { ...BASE_ROW, received_at: new Date(Date.now() - 3 * 60 * 60 * 1000) };
+
+    (proposals.findDaoIdForSource as ReturnType<typeof vi.fn>).mockResolvedValue('dao-1');
+    (proposals.findBySource as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    await applier.applyBatch([longOrphaned]);
+
+    expect(archive.markHeld).not.toHaveBeenCalled();
+    expect(archive.incrementAttemptCount).toHaveBeenCalledWith(BASE_ROW.id);
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'failed', reason: 'no_proposal' }),
+    );
+  });
+
+  it('quarantines an orphaned vote in the DLQ once the attempt threshold is reached', async () => {
+    const { applier, dlq, proposals } = buildApplier();
+    const exhausted = {
+      ...BASE_ROW,
+      received_at: new Date(Date.now() - 3 * 60 * 60 * 1000),
+      derivation_attempt_count: 4,
+    };
+
+    (proposals.findDaoIdForSource as ReturnType<typeof vi.fn>).mockResolvedValue('dao-1');
+    (proposals.findBySource as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    await applier.applyBatch([exhausted]);
+
+    expect(dlq.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'vote_projection_stage' }),
     );
   });
 
