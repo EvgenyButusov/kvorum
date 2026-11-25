@@ -10,7 +10,6 @@ import {
   chDb,
   pgDb,
 } from '@libs/db';
-import { defineCounter, defineGauge } from '@libs/observability';
 import {
   COMPOUND_ACTOR_SWEEP_EXTRACTOR,
   CompTokenArchiveWriter,
@@ -35,18 +34,11 @@ import type { SourcePlugin } from '@sources/core';
 import { ChainContextModule } from '@nest/chain';
 import { toChainLogger } from '@nest/chain';
 import { DbModule } from '@nest/db';
+import { buildArchiveAuditMetrics } from './compound-metrics';
 import { createReconcileLogger } from './reconcile-logger';
 import { buildDriverMetrics } from '../../reconcile-metrics';
 
 export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
-const archiveAuditLag = defineGauge({
-  name: 'compound_archive_audit_lag_blocks',
-  description: 'Blocks remaining behind the safe Compound archive reconciliation target',
-});
-const archiveEventsRepaired = defineCounter({
-  name: 'compound_archive_audit_events_repaired',
-  description: 'Individual missing Compound events restored and verified in both archives',
-});
 
 @Module({
   imports: [
@@ -183,30 +175,7 @@ const archiveEventsRepaired = defineCounter({
         const reconcileLogger = createReconcileLogger();
         const metrics = buildDriverMetrics();
         const archiveRepository = new CompoundArchiveReconcileRepository(pgDb, chDb);
-        const recordArchiveAuditLag = (sourceType: string, blocks: number) =>
-          archiveAuditLag.record(blocks, { source_type: sourceType });
-        const recordArchiveRepair: NonNullable<
-          Parameters<typeof createCompoundGovernorOzReconcilePlugin>[0]['recordArchiveRepair']
-        > = (labels) => archiveEventsRepaired.add(1, { ...labels });
-        // Export zero-valued series before the first repair so Prometheus can
-        // measure the first increment and distinguish healthy zero from no data.
-        for (const source_type of [
-          'compound_governor_alpha',
-          'compound_governor_bravo',
-          'compound_governor_oz',
-        ]) {
-          for (const event_type of [
-            'ProposalCreated',
-            'ProposalQueued',
-            'ProposalExecuted',
-            'ProposalCanceled',
-            'VoteCast',
-          ]) {
-            for (const missing_store of ['postgres', 'clickhouse', 'both']) {
-              archiveEventsRepaired.add(0, { source_type, event_type, missing_store });
-            }
-          }
-        }
+        const { recordArchiveAuditLag, recordArchiveRepair } = buildArchiveAuditMetrics();
         const logger = new Logger('CompoundSourceModule');
         logger.log('compound_comp_token plugin registered');
 
