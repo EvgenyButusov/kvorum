@@ -18,6 +18,8 @@ Monitor the `indexer_archive_audit_lag_blocks` gauge (normally near zero after t
 
 ### Repair volume KPI: north star = 0
 
+The KPI and the instrumentation contract behind it are [ADR-0091](../adr/0091-reconciliation-quality-kpi.md).
+
 Use `indexer_archive_audit_events_repaired_total` to count individual verified repairs (one logical event even if both stores were missing it). The low-cardinality labels are `source_type`, `event_type`, and `missing_store` (`postgres`, `clickhouse`, or `both`). Grafana displays rolling 24-hour volume and breakdown; the target is **zero after the initial historical catch-up**. Prometheus counters are process-local and `increase` estimates the count across scrape intervals and restarts; use structured logs for individual identities. Always interpret zero together with audit lag, verification progress, and failure outcomes — an inactive audit is not healthy.
 
 ```promql
