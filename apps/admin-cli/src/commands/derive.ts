@@ -22,6 +22,13 @@ type DeriveRedecodeOptions = DeriveCommon & {
   dryRun?: boolean;
 };
 
+type DeriveAuditRewindOptions = DeriveCommon & {
+  fromBlock?: string;
+  source?: string[];
+  confirm?: boolean;
+  production?: boolean;
+  dryRun?: boolean;
+};
 type DeriveRetitleOptions = DeriveCommon & {
   confirm?: boolean;
   production?: boolean;
@@ -170,6 +177,69 @@ export function registerDerive(program: Command): void {
               : `Verification failed; differing fields: ${diffs.join(', ')} (${payload.scope})`,
           payload,
         );
+      });
+    });
+
+  derive
+    .command('audit-rewind')
+    .description('Rewind the archive-completeness audit cursor so a block range is audited again')
+    .requiredOption('--from-block <N>', 'first block to audit again')
+    .option('--source <type...>', 'proposal source type(s) to scope to; omit for all')
+    .option('--confirm', 'confirm the operation')
+    .option('--production', 'acknowledge production environment')
+    .option('--dry-run', 'report how many cursors would move without writing')
+    .option('--format <format>', 'output format: human or json')
+    .action(async function action(opts: DeriveAuditRewindOptions) {
+      await withDeriveFormat(this, opts, async (format) => {
+        const fromBlock = parseOptionalBlock(opts.fromBlock, '--from-block');
+        if (fromBlock === undefined) {
+          fail(format, ExitCode.ValidationFailure, '--from-block is required');
+        }
+        // The audit resumes at last_checked_block + 1, so land the cursor one short of the target.
+        const toBlock = fromBlock > 0n ? fromBlock - 1n : 0n;
+        const dryRun = opts.dryRun === true;
+        if (!dryRun && (opts.confirm !== true || opts.production !== true)) {
+          fail(
+            format,
+            ExitCode.ValidationFailure,
+            'derive audit-rewind requires both --confirm and --production, or --dry-run',
+          );
+        }
+
+        const { archiveDerivationRepository } = buildContainer();
+        if (dryRun) {
+          const rows = await archiveDerivationRepository.countArchiveReconcileRewind(
+            toBlock,
+            opts.source,
+          );
+          emit(format, () => `Would rewind ${rows} audit cursor(s) to block ${toBlock}`, {
+            dry_run: true,
+            affected_rows: rows,
+            from_block: fromBlock.toString(),
+            cursor_block: toBlock.toString(),
+            source_types: opts.source ?? null,
+          });
+          return;
+        }
+
+        await withAudit('derive audit-rewind', { ...opts }, async () => {
+          const count = await archiveDerivationRepository.rewindArchiveReconcileCursor(
+            toBlock,
+            opts.source,
+          );
+          emit(
+            format,
+            () =>
+              `Rewound ${count} audit cursor(s) to block ${toBlock}; the audit re-reads from ${fromBlock} on its next tick`,
+            {
+              rewound_rows: count,
+              from_block: fromBlock.toString(),
+              cursor_block: toBlock.toString(),
+              source_types: opts.source ?? null,
+              note: 'Cursors already at or behind the target are left alone',
+            },
+          );
+        });
       });
     });
 

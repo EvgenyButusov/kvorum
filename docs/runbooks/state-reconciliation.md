@@ -36,7 +36,7 @@ LEFT JOIN archive_reconcile_cursor c ON c.dao_source_id = s.id
 WHERE s.source_type IN ('compound_governor_alpha', 'compound_governor_bravo', 'compound_governor_oz');
 ```
 
-This is a rolling completeness check, not a full-history validation or a proof of RPC completeness. An RPC provider that silently omits the same event on both the original ingestion and the independent audit can still evade detection. Historical ranges preceding the initial audit window require a separately scoped canonical audit. Reorg cleanup remains the responsibility of the existing reorg pipeline. Projection rows whose parent proposal is not yet derived are held for retry rather than dropped, but the hold is bounded — see below.
+This is a rolling completeness check, not a full-history validation or a proof of RPC completeness. An RPC provider that silently omits the same event on both the original ingestion and the independent audit can still evade detection. Historical ranges preceding the initial audit window are not covered until the cursor is rewound over them — see "Re-auditing a historical range". Reorg cleanup remains the responsibility of the existing reorg pipeline. Projection rows whose parent proposal is not yet derived are held for retry rather than dropped, but the hold is bounded — see below.
 
 ## Prerequisites
 
@@ -165,6 +165,38 @@ Watch logs/metrics for `state_reconcile_missed_event` (on-chain `executed|queued
 ## Optional manual SQL escape hatch
 
 Manual correction SQL is emergency-only and must be recorded in incident notes. Normal path is reconciler + backfill/event re-derivation.
+
+## Re-auditing a historical range
+
+On its first run the audit starts at most `INITIAL_LOOKBACK_BLOCKS` (50,000, roughly a week of
+mainnet blocks) behind its target, and the cursor only moves forward. Blocks older than that first
+window are never read, so a discrepancy predating the deployment stays invisible until the cursor is
+rewound over it.
+
+`derive audit-rewind` does that. Check the scope first:
+
+```bash
+kubectl -n kvorum exec -it deploy/kvorum-indexer -- node dist/apps/admin-cli/main.js \
+  derive audit-rewind --from-block <N> --dry-run
+```
+
+Then rewind, optionally narrowing with `--source` (repeatable):
+
+```bash
+kubectl -n kvorum exec -it deploy/kvorum-indexer -- node dist/apps/admin-cli/main.js \
+  derive audit-rewind --from-block <N> --confirm --production
+```
+
+The cursor lands on `N - 1`, so the next tick re-reads from `N`. It is a rewind only: a cursor
+already at or behind the target is left alone, because moving one forward would mark blocks the
+audit has never read as checked. Re-running the same command is therefore a no-op, and the command
+is safe to repeat if a tick is interrupted.
+
+Expect repairs. Re-auditing a range that was never audited is exactly the "initial historical
+catch-up" the KPI excludes, so `archive_audit_events_repaired` will rise while the cursor walks
+forward and `archive_audit_lag_blocks` will jump by the rewound distance before draining at up to
+`MAX_BLOCKS_PER_TICK` (10,000) per tick. Judge the KPI's zero target only once lag is back near
+zero. The audit does not touch the live or backfill cursor, so ingestion is unaffected.
 
 ## Orphaned projection rows
 

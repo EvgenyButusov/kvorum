@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { DummyDriver, Kysely, PostgresDialect } from 'kysely';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ArchiveDerivationAdminRepository } from './archive-derivation-admin-repository';
+import type { PgDatabase } from './schema/pg';
 
 function makeCountSelectChain(returnValue: unknown) {
   const executeTakeFirstOrThrow = vi.fn().mockResolvedValue(returnValue);
@@ -58,5 +60,66 @@ describe('ArchiveDerivationAdminRepository', () => {
       derivation_attempt_count: 0,
     });
     expect(update.chain.where).toHaveBeenCalledWith('id', '=', 'ac-1');
+  });
+});
+
+// The rewind's safety property is a SQL predicate, so these compile against the real Postgres
+// dialect and assert the statement rather than a mock chain.
+const compiled: Kysely<PgDatabase>[] = [];
+async function realDialect() {
+  const driver = new DummyDriver();
+  const connection = await driver.acquireConnection();
+  const execute = vi.spyOn(connection, 'executeQuery').mockResolvedValue({ rows: [] });
+  vi.spyOn(driver, 'acquireConnection').mockResolvedValue(connection);
+  const dialect = new PostgresDialect({ pool: {} as never });
+  const db = new Kysely<PgDatabase>({
+    dialect: {
+      createDriver: () => driver,
+      createAdapter: () => dialect.createAdapter(),
+      createQueryCompiler: () => dialect.createQueryCompiler(),
+      createIntrospector: (instance) => dialect.createIntrospector(instance),
+    },
+  });
+  compiled.push(db);
+  return { db, execute, repo: new ArchiveDerivationAdminRepository(db) };
+}
+
+afterEach(async () => {
+  await Promise.all(compiled.splice(0).map((db) => db.destroy()));
+});
+
+describe('archive reconcile cursor rewind', () => {
+  it('only moves cursors already past the target, never forward', async () => {
+    const { execute, repo } = await realDialect();
+
+    await repo.rewindArchiveReconcileCursor(1_000n);
+
+    const query = execute.mock.calls[0]![0];
+    expect(query.sql).toBe(
+      'update "archive_reconcile_cursor" set "last_checked_block" = $1 where "last_checked_block" > $2',
+    );
+    expect(query.parameters).toEqual(['1000', '1000']);
+  });
+
+  it('scopes to the given source types through dao_source', async () => {
+    const { execute, repo } = await realDialect();
+
+    await repo.rewindArchiveReconcileCursor(500n, ['compound_governor_oz']);
+
+    const query = execute.mock.calls[0]![0];
+    expect(query.sql).toContain('"dao_source_id" in (select "dao_source"."id" from "dao_source"');
+    expect(query.sql).toContain('"dao_source"."source_type" in ($3)');
+    expect(query.parameters).toEqual(['500', '500', 'compound_governor_oz']);
+  });
+
+  it('counts the same scope it would rewind', async () => {
+    const { execute, repo } = await realDialect();
+    execute.mockResolvedValue({ rows: [{ count: '3' }] });
+
+    await expect(repo.countArchiveReconcileRewind(750n)).resolves.toBe(3);
+
+    const query = execute.mock.calls[0]![0];
+    expect(query.sql).toContain('from "archive_reconcile_cursor"');
+    expect(query.sql).toContain('"last_checked_block" > $1');
   });
 });
