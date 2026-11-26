@@ -68,7 +68,8 @@ describe('DerivationWorkerService', () => {
     expect(actorResolution.findDerivableByOffchain).toHaveBeenCalledWith(
       ['SnapshotProposalCreated'],
       50,
-      50,
+      expect.any(Date),
+      { maxAttempts: 50 },
     );
     expect(offchainApplier.applyBatch).toHaveBeenCalledWith([OFFCHAIN_ROW]);
     expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
@@ -180,7 +181,12 @@ describe('DerivationWorkerService', () => {
 
     await worker.tick();
 
-    expect(actorResolution.findDerivableBy).toHaveBeenCalledWith(['test_event_created'], 50, 50);
+    expect(actorResolution.findDerivableBy).toHaveBeenCalledWith(
+      ['test_event_created'],
+      50,
+      expect.any(Date),
+      { maxAttempts: 50 },
+    );
     expect(archive.incrementAttemptCount).toHaveBeenCalledWith('archive-1');
   });
 

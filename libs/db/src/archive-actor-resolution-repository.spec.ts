@@ -60,7 +60,7 @@ describe('ArchiveActorResolutionRepository', () => {
     const pgSelect = makeSelectChain([ARCHIVE_ROW]);
     const repo = new ArchiveActorResolutionRepository({ selectFrom: pgSelect.selectFrom } as never);
 
-    await expect(repo.findDerivableBy(['VoteCast'], 10, 50)).resolves.toEqual([ARCHIVE_ROW]);
+    await expect(repo.findDerivableBy(['VoteCast'], 10)).resolves.toEqual([ARCHIVE_ROW]);
 
     // external_id IS NULL restricts to EVM rows (ADR-071) so coords are non-null.
     expect(pgSelect.where).toHaveBeenCalledWith('external_id', 'is', null);
@@ -73,7 +73,7 @@ describe('ArchiveActorResolutionRepository', () => {
     const pgSelect = makeSelectChain([ARCHIVE_ROW]);
     const repo = new ArchiveActorResolutionRepository({ selectFrom: pgSelect.selectFrom } as never);
 
-    await expect(repo.findDerivableBy([], 10, 50)).resolves.toEqual([]);
+    await expect(repo.findDerivableBy([], 10)).resolves.toEqual([]);
     expect(pgSelect.selectFrom).not.toHaveBeenCalled();
   });
 
@@ -150,7 +150,7 @@ describe('ArchiveActorResolutionRepository', () => {
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
       const now = new Date('2026-01-01T00:05:00Z');
 
-      await repo.findDerivableBy(['ProposalCreated'], 50, 50, now);
+      await repo.findDerivableBy(['ProposalCreated'], 50, now);
       const { calls, or } = capturePredicate(select);
 
       expect(or).toHaveBeenCalledTimes(1);
@@ -166,7 +166,7 @@ describe('ArchiveActorResolutionRepository', () => {
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
       const now = new Date('2026-01-01T00:05:00Z');
 
-      await repo.findDerivableByOffchain(['ProposalCreated'], 50, 50, now);
+      await repo.findDerivableByOffchain(['ProposalCreated'], 50, now);
       const { calls, or } = capturePredicate(select);
 
       expect(or).toHaveBeenCalledTimes(1);
@@ -192,7 +192,7 @@ describe('ArchiveActorResolutionRepository', () => {
       const select = makeSelectChain([ARCHIVE_ROW]);
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
 
-      await repo.findDerivableBy(['VoteCast'], 50, 50);
+      await repo.findDerivableBy(['VoteCast'], 50);
 
       const predicates = select.where.mock.calls
         .map((call) => call[0])
@@ -248,7 +248,7 @@ describe('ArchiveActorResolutionRepository', () => {
       const select = makeSelectChain([]);
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
 
-      await repo.findDerivableByOffchain(['SnapshotProposalCreated'], 50, 50);
+      await repo.findDerivableByOffchain(['SnapshotProposalCreated'], 50);
 
       const predicates = select.where.mock.calls.filter(([arg]) => typeof arg === 'function');
       expect(predicates).toHaveLength(2);
@@ -279,16 +279,43 @@ describe('ArchiveActorResolutionRepository', () => {
       const select = makeSelectChain([]);
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
 
-      await repo.findDerivableBy(['ProposalCreated'], 50, 7);
+      await repo.findDerivableBy(['ProposalCreated'], 50, new Date(), { maxAttempts: 7 });
 
       expect(predicateArgs(select, 1)).toEqual([['derivation_attempt_count', '<', 7]]);
+    });
+
+    // CI caught this: a ceiling inserted ahead of `now` rebound every existing positional call,
+    // emptying the queue in the suites that are outside the typecheck projects.
+    it('still bounds a caller that passes only event types and a limit', async () => {
+      const select = makeSelectChain([]);
+      const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
+
+      await repo.findDerivableBy(['ProposalCreated'], 50);
+
+      expect(predicateArgs(select, 1)).toEqual([['derivation_attempt_count', '<', 50]]);
+    });
+
+    it('keeps the third argument meaning `now`, not the ceiling', async () => {
+      const select = makeSelectChain([]);
+      const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
+      const now = new Date('2026-01-01T00:05:00Z');
+
+      await repo.findDerivableBy(['ProposalCreated'], 50, now);
+
+      expect(predicateArgs(select, 0)).toEqual([
+        ['derivation_hold_until', 'is', null],
+        ['derivation_hold_until', '<=', now],
+      ]);
+      expect(predicateArgs(select, 1)).toEqual([['derivation_attempt_count', '<', 50]]);
     });
 
     it('parks an off-chain row on the same ceiling', async () => {
       const select = makeSelectChain([]);
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
 
-      await repo.findDerivableByOffchain(['SnapshotProposalCreated'], 50, 7);
+      await repo.findDerivableByOffchain(['SnapshotProposalCreated'], 50, new Date(), {
+        maxAttempts: 7,
+      });
 
       expect(predicateArgs(select, 1)).toEqual([['derivation_attempt_count', '<', 7]]);
     });

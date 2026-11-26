@@ -39,7 +39,10 @@ export type {
 } from './archive-derivation-repository';
 export { ArchiveDerivationRepository } from './archive-derivation-repository';
 export { ArchiveDerivationAdminRepository } from './archive-derivation-admin-repository';
-export { ArchiveActorResolutionRepository } from './archive-actor-resolution-repository';
+export {
+  ArchiveActorResolutionRepository,
+  DEFAULT_MAX_DERIVATION_ATTEMPTS,
+} from './archive-actor-resolution-repository';
 export type { ArchiveEventKey, ArchiveEventExternalKey } from './archive-event-repository';
 export { ArchiveEventRepository } from './archive-event-repository';
 export { OffChainCursorRepository } from './off-chain-cursor-repository';

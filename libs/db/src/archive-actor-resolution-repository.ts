@@ -20,7 +20,13 @@ function notHeld(now: Date) {
  * column and the overflow itself became the failure. The actor-resolution stage has always bounded
  * itself this way (`actor_resolution_attempt_count < attemptThreshold`); this is that bound for the
  * projection stage. Parked rows return to the queue through `derive replay`, which resets the count.
+ *
+ * It arrives in an options object rather than a positional parameter: inserting one ahead of `now`
+ * silently rebound every existing `(eventTypes, limit, now)` call site, and the integration and e2e
+ * suites that caught it are outside the typecheck projects.
  */
+export const DEFAULT_MAX_DERIVATION_ATTEMPTS = 50;
+
 function notExhausted(maxAttempts: number) {
   return (eb: ExpressionBuilder<PgDatabase, 'archive_event'>) =>
     eb('derivation_attempt_count', '<', maxAttempts);
@@ -86,8 +92,8 @@ export class ArchiveActorResolutionRepository {
   async findDerivableBy(
     eventTypes: readonly ArchiveEventType[],
     limit: number,
-    maxAttempts: number,
     now: Date = new Date(),
+    options: { maxAttempts?: number } = {},
   ): Promise<ArchiveDerivationRow[]> {
     if (eventTypes.length === 0) return [];
 
@@ -114,7 +120,7 @@ export class ArchiveActorResolutionRepository {
       .where('derivation_actor_resolved_at', 'is not', null)
       .where('event_type', 'in', eventTypes)
       .where(notHeld(now))
-      .where(notExhausted(maxAttempts))
+      .where(notExhausted(options.maxAttempts ?? DEFAULT_MAX_DERIVATION_ATTEMPTS))
       .where(notInProjectionDlq())
       .orderBy('chain_id', 'asc')
       .orderBy('block_number', 'asc')
@@ -168,8 +174,8 @@ export class ArchiveActorResolutionRepository {
   async findDerivableByOffchain(
     eventTypes: readonly ArchiveEventType[],
     limit: number,
-    maxAttempts: number,
     now: Date = new Date(),
+    options: { maxAttempts?: number } = {},
   ): Promise<OffchainArchiveRow[]> {
     if (eventTypes.length === 0) return [];
 
@@ -181,7 +187,7 @@ export class ArchiveActorResolutionRepository {
       .where('derivation_actor_resolved_at', 'is not', null)
       .where('event_type', 'in', eventTypes)
       .where(notHeld(now))
-      .where(notExhausted(maxAttempts))
+      .where(notExhausted(options.maxAttempts ?? DEFAULT_MAX_DERIVATION_ATTEMPTS))
       .orderBy('chain_id', 'asc')
       .orderBy('derivation_ordinal', 'asc')
       .orderBy('external_id', 'asc')
@@ -194,7 +200,7 @@ export class ArchiveActorResolutionRepository {
   /** Rows parked by the attempt ceiling, per source type, for the parked-rows gauge. */
   async countExhausted(
     eventTypes: readonly ArchiveEventType[],
-    maxAttempts: number,
+    maxAttempts: number = DEFAULT_MAX_DERIVATION_ATTEMPTS,
   ): Promise<{ source_type: string; count: number }[]> {
     if (eventTypes.length === 0) return [];
 
