@@ -1,23 +1,23 @@
 # ADR-0091 — Reconciliation quality KPI and the instrumentation contract every reconciler owes it
 
-- **Status**: Accepted
+- **Status**: Proposed
 - **Date**: 2026-11-26
-- **Spec sections affected**: 3.10, 3.12
+- **Spec sections affected**: 3.12
 - **Related**: [ADR-0049](0049-onchain-state-reconciliation.md) (the first reconciler), [ADR-041](0041-cross-db-integrity-contract.md) and [ADR-0058](0058-confirmed-head-only-ingestion.md) (the write protocol the archive audit checks), [ADR-0076](0076-lido-easy-track-optimistic-motion-modeling.md) (optimistic-pass reconciliation), [ADR-045](0045-drop-metric-name-prefix.md) (metric naming); `docs/runbooks/state-reconciliation.md`
 
 ## Context
 
-Kvorum now runs eight reconcilers across four source families: Compound's state reconciler and archive-completeness audit, Aave's governance-v3, governor-v2 and payloads-controller state reconcilers, and Lido's Aragon voting, Dual Governance and Easy Track reconcilers. They share a driver (`libs/sources/core/src/reconcile/reconcile-driver.ts`) and a metric set (`nest/sources/reconcile-metrics.ts`).
+Kvorum now runs eight reconcilers across three source families: Compound's state reconciler and archive-completeness audit, Aave's governance-v3, governor-v2 and payloads-controller state reconcilers, and Lido's Aragon voting, Dual Governance and Easy Track reconcilers. They share a driver (`libs/sources/core/src/reconcile/reconcile-driver.ts`) and a metric set (`nest/sources/reconcile-metrics.ts`).
 
 A reconciler is load-bearing in a way that makes it easy to misread. It repairs data, so a working reconciler and a broken ingester look alike from the outside: both end with correct rows in the database. Without a number that separates them, an ingestion defect can run for months behind a reconciler that quietly papers over it every tick, and the papering-over reads as health.
 
-Three failure modes follow from that, and all three have precedent in this repository:
+Three failure modes follow from that. The first has concrete precedent here; the other two are the shapes it would have taken had the instrumentation gone one step further wrong:
 
 1. **A repair that nobody counts.** Before this ADR's contract was applied, Compound's projection appliers passed `processed: () => undefined`. A row deferred by `markHeld` emitted no metric and no log, so the `held` outcome was invisible — which is also what made an unbounded hold survive review.
-2. **A count that measures the wrong thing.** Counting batches, passes or ticks instead of repaired logical records produces a number that moves with the schedule rather than with data quality. One tick that repairs 400 rows and one that repairs none are indistinguishable.
+2. **A count that measures the wrong thing.** Counting batches, passes or ticks instead of repaired logical records produces a number that moves with the schedule rather than with data quality. One tick that repairs 400 rows and one that repairs none are indistinguishable. Compound's archive audit still records one `state_reconcile` outcome per audited interval for exactly this reason — it is a liveness signal, and the per-record count had to be added beside it.
 3. **Zero that means nothing.** A stalled loop, a disabled plugin and a genuinely clean system all report zero repairs. Zero is only evidence when read next to progress and failure signals.
 
-The policy that answers these has lived in `CLAUDE.md` since the Compound reconciler shipped. That is the wrong home: it is an architectural constraint on every future source, not a working convention, and `CLAUDE.md` is neither indexed nor versioned as a decision record.
+The policy that answers these was written into `CLAUDE.md` while hardening the Compound reconciler. That is the wrong home: it is an architectural constraint on every future source, not a working convention, and `CLAUDE.md` is neither indexed nor versioned as a decision record.
 
 ## Decision
 
@@ -27,7 +27,7 @@ Every reconciler added or modified owes the KPI four things.
 
 ### 1. Counts of repaired logical records, not batches
 
-The unit is the repaired record: one `archive_audit_events_repaired` increment per restored event, one `state_reconcile` increment per classified proposal. Batch-level and tick-level signals (`state_reconcile_batch_saturated`, `state_reconcile_tick_duration_seconds`) are operational telemetry and do not substitute.
+The unit is the repaired record: one `archive_audit_events_repaired` increment per restored event, one `state_reconcile` increment per proposal the state reconciler classifies. Signals whose unit is a batch, a tick or an audited interval — `state_reconcile_batch_saturated`, `state_reconcile_tick_duration_seconds`, and the audit's own `archive_verified`/`archive_repaired` outcomes — are liveness and operational telemetry. They do not substitute for a per-record count.
 
 ### 2. Bounded labels, and nothing identifying
 
@@ -53,9 +53,9 @@ A stalled or disabled reconciliation loop is not healthy zero. Progress and fail
 
 - **Leave the policy in `CLAUDE.md`.** Rejected. It constrains the design of every future source, so it belongs where the ADR index surfaces it and where a change to it is a reviewable decision. A one-line pointer stays in `CLAUDE.md`.
 - **Target a nonzero repair budget, or alert only on a rate increase.** Rejected. A budget normalizes the defect it is supposed to surface: any steady-state repair means ingestion wrote something wrong, and a threshold invites tuning the threshold. The cost of zero as the target is that historical catch-up has to be explained each time rather than absorbed.
-- **Enforce the instrumentation contract with a lint rule or a shared base class.** Not adopted. `libs/sources/*` is framework-agnostic by design and the reconcilers differ in what a "record" is; the contract is enforced in review, as the module boundaries are. Worth revisiting if a fifth source family lands with the same gaps.
+- **Enforce the instrumentation contract with a lint rule or a shared base class.** Not adopted. `libs/sources/*` is framework-agnostic by design and the reconcilers differ in what a "record" is; the contract is enforced in review, as the module boundaries are. Worth revisiting if a fourth source family lands with the same gaps.
 - **Measure repairs from the database instead (diff the projection against chain state on a schedule).** Rejected as the primary signal. It is a second reconciler with the same blind spots, costs RPC, and reports a snapshot rather than attributing a repair to the ingestion path that caused it. It remains the right tool for a one-off audit.
-- **Count repairs only at batch granularity, which every reconciler already did.** Rejected per §1: the number tracks the schedule, not the data.
+- **Count repairs only at batch or interval granularity, as the archive audit's `state_reconcile` outcomes do.** Rejected as the KPI's unit per §1: the number tracks the schedule, not the data. Those outcomes stay, as liveness.
 
 ## Consequences
 

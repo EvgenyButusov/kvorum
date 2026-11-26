@@ -56,7 +56,7 @@ See SPEC §8.4 for the ADR process. Numbering continues from the v1.0 DRs (DR-00
 | [ADR-0088](0088-forum-synthesis-proposal-subresource.md)     | Forum synthesis exposed as a proposal sub-resource, not a thread-addressed route (amends §5.4)        | Accepted                      | 5.4                                     |
 | [ADR-0089](0089-search-architecture.md)                      | PostgreSQL full-text search for cross-entity keyword search                                           | Accepted                      | n/a (new capability)                    |
 | [ADR-0090](0090-single-node-k3s-topology.md)                 | Single-node k3s deployment topology (supersedes the §7.1/§7.8 Hetzner Compose design)                 | Accepted                      | 7.1, 7.5, 7.7, 7.8                      |
-| [ADR-0091](0091-reconciliation-quality-kpi.md)               | Reconciliation quality KPI (zero unexpected repairs) and the reconciler instrumentation contract      | Accepted                      | 3.10, 3.12                              |
+| [ADR-0091](0091-reconciliation-quality-kpi.md)               | Reconciliation quality KPI (zero unexpected repairs) and the reconciler instrumentation contract      | Proposed                      | 3.12                                    |
 
 ## Status legend
 
