@@ -90,6 +90,7 @@ export class DerivationWorkerService implements OnApplicationBootstrap {
         { maxAttempts },
       );
       await this.recordParkedRows(maxAttempts);
+      await this.recordHeldBacklog();
       if (watermark.length === 0 && offchainWatermark.length === 0) {
         derivationMetrics.lagSeconds.record(0);
         return;
@@ -178,6 +179,24 @@ export class DerivationWorkerService implements OnApplicationBootstrap {
     } catch (err) {
       // Observability must never stop derivation.
       this.logger.warn('derivation_parked_count_failed', { error: String(err) });
+    }
+  }
+
+  /**
+   * ADR-0065 keeps the cross-chain stitch hold indefinite, so the signal that matters is the
+   * oldest hold's age rather than a retry count.
+   */
+  private async recordHeldBacklog(): Promise<void> {
+    try {
+      const held = await this.actorResolution.oldestHeldAgeSeconds([
+        ...this.eventTypes,
+        ...this.offchainEventTypes,
+      ]);
+      for (const { source_type, age_seconds } of held) {
+        derivationMetrics.heldOldestSeconds.record(age_seconds, { source_type });
+      }
+    } catch (err) {
+      this.logger.warn('derivation_held_age_failed', { error: String(err) });
     }
   }
 
