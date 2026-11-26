@@ -14,6 +14,25 @@ function notHeld(now: Date) {
 }
 
 /**
+ * A row stops being derivable once it has failed `maxAttempts` times. The projection stage had no
+ * such ceiling, so a row whose failure never clears — a permanently absent parent, an undecodable
+ * payload — was reselected every tick forever, until `derivation_attempt_count` overflowed its
+ * column and the overflow itself became the failure. The actor-resolution stage has always bounded
+ * itself this way (`actor_resolution_attempt_count < attemptThreshold`); this is that bound for the
+ * projection stage. Parked rows return to the queue through `derive replay`, which resets the count.
+ *
+ * It arrives in an options object rather than a positional parameter: inserting one ahead of `now`
+ * silently rebound every existing `(eventTypes, limit, now)` call site, and the integration and e2e
+ * suites that caught it are outside the typecheck projects.
+ */
+export const DEFAULT_MAX_DERIVATION_ATTEMPTS = 50;
+
+function notExhausted(maxAttempts: number) {
+  return (eb: ExpressionBuilder<PgDatabase, 'archive_event'>) =>
+    eb('derivation_attempt_count', '<', maxAttempts);
+}
+
+/**
  * Projection DLQ rows are quarantined until an operator retries them. The retry adapter removes the
  * active DLQ row after resetting the archive watermark, which makes the event eligible again. An
  * accepted DLQ row remains quarantined through ingestion_dlq_resolved, matching ADR-032's permanent
@@ -74,6 +93,7 @@ export class ArchiveActorResolutionRepository {
     eventTypes: readonly ArchiveEventType[],
     limit: number,
     now: Date = new Date(),
+    options: { maxAttempts?: number } = {},
   ): Promise<ArchiveDerivationRow[]> {
     if (eventTypes.length === 0) return [];
 
@@ -100,6 +120,7 @@ export class ArchiveActorResolutionRepository {
       .where('derivation_actor_resolved_at', 'is not', null)
       .where('event_type', 'in', eventTypes)
       .where(notHeld(now))
+      .where(notExhausted(options.maxAttempts ?? DEFAULT_MAX_DERIVATION_ATTEMPTS))
       .where(notInProjectionDlq())
       .orderBy('chain_id', 'asc')
       .orderBy('block_number', 'asc')
@@ -154,6 +175,7 @@ export class ArchiveActorResolutionRepository {
     eventTypes: readonly ArchiveEventType[],
     limit: number,
     now: Date = new Date(),
+    options: { maxAttempts?: number } = {},
   ): Promise<OffchainArchiveRow[]> {
     if (eventTypes.length === 0) return [];
 
@@ -165,6 +187,7 @@ export class ArchiveActorResolutionRepository {
       .where('derivation_actor_resolved_at', 'is not', null)
       .where('event_type', 'in', eventTypes)
       .where(notHeld(now))
+      .where(notExhausted(options.maxAttempts ?? DEFAULT_MAX_DERIVATION_ATTEMPTS))
       .orderBy('chain_id', 'asc')
       .orderBy('derivation_ordinal', 'asc')
       .orderBy('external_id', 'asc')
@@ -172,6 +195,24 @@ export class ArchiveActorResolutionRepository {
       .limit(limit)
       .execute();
     return rows as OffchainArchiveRow[];
+  }
+
+  /** Rows parked by the attempt ceiling, per source type, for the parked-rows gauge. */
+  async countExhausted(
+    eventTypes: readonly ArchiveEventType[],
+    maxAttempts: number = DEFAULT_MAX_DERIVATION_ATTEMPTS,
+  ): Promise<{ source_type: string; count: number }[]> {
+    if (eventTypes.length === 0) return [];
+
+    const rows = await this.pgDb
+      .selectFrom('archive_event')
+      .select(['source_type', (eb) => eb.fn.countAll<string>().as('count')])
+      .where('derived_at', 'is', null)
+      .where('event_type', 'in', eventTypes)
+      .where('derivation_attempt_count', '>=', maxAttempts)
+      .groupBy('source_type')
+      .execute();
+    return rows.map((row) => ({ source_type: row.source_type, count: Number(row.count) }));
   }
 
   /** Off-chain counterpart of findUnresolvedActors. */

@@ -39,6 +39,10 @@ export const derivationMetrics = {
     name: 'derivation_timestamp_fill',
     description: 'Lazy voting timestamp fill outcomes',
   }),
+  parkedRows: defineGauge({
+    name: 'derivation_parked_rows',
+    description: 'Un-derived rows past the projection attempt ceiling, by source type',
+  }),
   timestampFillBacklog: defineGauge({
     name: 'derivation_timestamp_fill_backlog',
     description: 'Count of proposals pending lazy voting timestamp fill',

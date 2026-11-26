@@ -200,6 +200,24 @@ forward and `archive_audit_lag_blocks` will jump by the rewound distance before 
 `MAX_BLOCKS_PER_TICK` (10,000) per tick. Judge the KPI's zero target only once lag is back near
 zero. The audit does not touch the live or backfill cursor, so ingestion is unaffected.
 
+## Parked derivations
+
+A projection failure that never clears used to be retried on every tick for as long as the row
+existed. `DERIVATION_MAX_ATTEMPTS` (default 50) now parks such a row: past the ceiling it is skipped
+by the derivable queries, exactly as the actor-resolution stage has always bounded itself.
+
+A parked row is invisible to the queue, so `indexer_derivation_parked_rows` is the only signal that
+it exists. Any nonzero value is an unresolved derivation defect, not a transient — investigate the
+`aave_derivation_failed` / `compound_derivation_failed` logs for that source's `reason` before
+requeueing, because a requeue without a fix parks the row again 50 ticks later.
+
+```promql
+sum by (source_type) (indexer_derivation_parked_rows) or vector(0)
+```
+
+Requeue a parked row with `derive replay <dao_source_id>`, which resets both the watermark and the
+attempt count for the source.
+
 ## Orphaned projection rows
 
 A vote or lifecycle event whose parent proposal has not derived yet is held, not failed: a catch-up

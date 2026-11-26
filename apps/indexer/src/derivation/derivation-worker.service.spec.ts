@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ArchiveDerivationRow } from '@libs/db';
+import { derivationMetrics } from './derivation-metrics';
 import { DerivationWorkerService } from './derivation-worker.service';
 
 vi.mock('./derivation-metrics', () => ({
@@ -11,6 +12,7 @@ vi.mock('./derivation-metrics', () => ({
     chWriteSeconds: { record: vi.fn() },
     timestampFill: { add: vi.fn() },
     timestampFillBacklog: { record: vi.fn() },
+    parkedRows: { record: vi.fn() },
   },
 }));
 
@@ -52,6 +54,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([OFFCHAIN_ROW]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       archive as never,
@@ -65,6 +68,8 @@ describe('DerivationWorkerService', () => {
     expect(actorResolution.findDerivableByOffchain).toHaveBeenCalledWith(
       ['SnapshotProposalCreated'],
       50,
+      expect.any(Date),
+      { maxAttempts: 50 },
     );
     expect(offchainApplier.applyBatch).toHaveBeenCalledWith([OFFCHAIN_ROW]);
     expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
@@ -75,6 +80,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([OFFCHAIN_ROW]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       archive as never,
@@ -88,10 +94,56 @@ describe('DerivationWorkerService', () => {
     expect(archive.incrementAttemptCount).toHaveBeenCalledWith('oc-1');
   });
 
+  it('records parked rows so a row the ceiling excluded is still observable', async () => {
+    const actorResolution = {
+      findDerivableBy: vi.fn().mockResolvedValue([]),
+      findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([{ source_type: 'aave_governance_v3', count: 12 }]),
+    };
+    const worker = new DerivationWorkerService(
+      {} as never,
+      actorResolution as never,
+      makeRegistry() as never,
+      [],
+    );
+
+    await worker.tick();
+
+    expect(actorResolution.countExhausted).toHaveBeenCalledWith(expect.any(Array), 50);
+    expect(derivationMetrics.parkedRows.record).toHaveBeenCalledWith(12, {
+      source_type: 'aave_governance_v3',
+    });
+  });
+
+  it('keeps dispatching when the parked-row count fails', async () => {
+    const applier = {
+      kind: 'projection' as const,
+      sourceTypes: [ROW.source_type],
+      eventTypes: [ROW.event_type],
+      applyBatch: vi.fn().mockResolvedValue(undefined),
+    };
+    const actorResolution = {
+      findDerivableBy: vi.fn().mockResolvedValue([ROW]),
+      findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockRejectedValue(new Error('count unavailable')),
+    };
+    const worker = new DerivationWorkerService(
+      {} as never,
+      actorResolution as never,
+      makeRegistry() as never,
+      [bundleWith(applier)],
+    );
+
+    await worker.tick();
+
+    expect(applier.applyBatch).toHaveBeenCalledWith([ROW]);
+  });
+
   it('runs an initial tick on bootstrap', async () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       {} as never,
@@ -118,6 +170,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([ROW]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       archive as never,
@@ -128,7 +181,12 @@ describe('DerivationWorkerService', () => {
 
     await worker.tick();
 
-    expect(actorResolution.findDerivableBy).toHaveBeenCalledWith(['test_event_created'], 50);
+    expect(actorResolution.findDerivableBy).toHaveBeenCalledWith(
+      ['test_event_created'],
+      50,
+      expect.any(Date),
+      { maxAttempts: 50 },
+    );
     expect(archive.incrementAttemptCount).toHaveBeenCalledWith('archive-1');
   });
 
@@ -139,6 +197,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([ROW]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -188,6 +247,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([failedRow, healthyRow]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([OFFCHAIN_ROW]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       { incrementAttemptCount: vi.fn() } as never,
@@ -210,6 +270,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([ROW]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -238,6 +299,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([alphaRow]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -277,6 +339,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([rowA, rowB]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -303,6 +366,7 @@ describe('DerivationWorkerService', () => {
         .fn()
         .mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve([]), 50))),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       { incrementAttemptCount: vi.fn() } as never,
@@ -322,6 +386,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       {} as never,
@@ -352,6 +417,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([ROW, row2]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -377,6 +443,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([rowA, rowB]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -404,6 +471,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([rowA, rowB]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -431,6 +499,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([highRow]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -473,6 +542,7 @@ describe('DerivationWorkerService', () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([earlierCancel, create348, cancel348]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
     };
     const seen: string[] = [];
     const applier = {
