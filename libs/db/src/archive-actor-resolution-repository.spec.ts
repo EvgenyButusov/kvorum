@@ -23,12 +23,14 @@ function makeSelectChain(returnValue: unknown[]) {
     where: vi.fn(),
     orderBy: vi.fn(),
     limit: vi.fn(),
+    groupBy: vi.fn(),
     execute,
   };
   chain.select.mockReturnValue(chain);
   chain.where.mockReturnValue(chain);
   chain.orderBy.mockReturnValue(chain);
   chain.limit.mockReturnValue(chain);
+  chain.groupBy.mockReturnValue(chain);
   const selectFrom = vi.fn().mockReturnValue(chain);
 
   return { selectFrom, ...chain };
@@ -58,7 +60,7 @@ describe('ArchiveActorResolutionRepository', () => {
     const pgSelect = makeSelectChain([ARCHIVE_ROW]);
     const repo = new ArchiveActorResolutionRepository({ selectFrom: pgSelect.selectFrom } as never);
 
-    await expect(repo.findDerivableBy(['VoteCast'], 10)).resolves.toEqual([ARCHIVE_ROW]);
+    await expect(repo.findDerivableBy(['VoteCast'], 10, 50)).resolves.toEqual([ARCHIVE_ROW]);
 
     // external_id IS NULL restricts to EVM rows (ADR-071) so coords are non-null.
     expect(pgSelect.where).toHaveBeenCalledWith('external_id', 'is', null);
@@ -71,7 +73,7 @@ describe('ArchiveActorResolutionRepository', () => {
     const pgSelect = makeSelectChain([ARCHIVE_ROW]);
     const repo = new ArchiveActorResolutionRepository({ selectFrom: pgSelect.selectFrom } as never);
 
-    await expect(repo.findDerivableBy([], 10)).resolves.toEqual([]);
+    await expect(repo.findDerivableBy([], 10, 50)).resolves.toEqual([]);
     expect(pgSelect.selectFrom).not.toHaveBeenCalled();
   });
 
@@ -148,7 +150,7 @@ describe('ArchiveActorResolutionRepository', () => {
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
       const now = new Date('2026-01-01T00:05:00Z');
 
-      await repo.findDerivableBy(['ProposalCreated'], 50, now);
+      await repo.findDerivableBy(['ProposalCreated'], 50, 50, now);
       const { calls, or } = capturePredicate(select);
 
       expect(or).toHaveBeenCalledTimes(1);
@@ -164,7 +166,7 @@ describe('ArchiveActorResolutionRepository', () => {
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
       const now = new Date('2026-01-01T00:05:00Z');
 
-      await repo.findDerivableByOffchain(['ProposalCreated'], 50, now);
+      await repo.findDerivableByOffchain(['ProposalCreated'], 50, 50, now);
       const { calls, or } = capturePredicate(select);
 
       expect(or).toHaveBeenCalledTimes(1);
@@ -190,12 +192,12 @@ describe('ArchiveActorResolutionRepository', () => {
       const select = makeSelectChain([ARCHIVE_ROW]);
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
 
-      await repo.findDerivableBy(['VoteCast'], 50);
+      await repo.findDerivableBy(['VoteCast'], 50, 50);
 
       const predicates = select.where.mock.calls
         .map((call) => call[0])
         .filter((arg): arg is (eb: unknown) => unknown => typeof arg === 'function');
-      expect(predicates).toHaveLength(2);
+      expect(predicates).toHaveLength(3);
 
       const whereRef = vi.fn().mockReturnThis();
       const where = vi.fn().mockReturnThis();
@@ -211,7 +213,7 @@ describe('ArchiveActorResolutionRepository', () => {
         and: vi.fn((expressions: unknown[]) => ({ and: expressions })),
       };
 
-      predicates[1]!(eb);
+      predicates[2]!(eb);
 
       expect(selectFrom.mock.calls).toEqual([
         ['ingestion_dlq as dlq'],
@@ -246,10 +248,69 @@ describe('ArchiveActorResolutionRepository', () => {
       const select = makeSelectChain([]);
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
 
-      await repo.findDerivableByOffchain(['SnapshotProposalCreated'], 50);
+      await repo.findDerivableByOffchain(['SnapshotProposalCreated'], 50, 50);
 
       const predicates = select.where.mock.calls.filter(([arg]) => typeof arg === 'function');
-      expect(predicates).toHaveLength(1);
+      expect(predicates).toHaveLength(2);
+    });
+  });
+  describe('attempt ceiling', () => {
+    /** Runs the nth function predicate the repo passed to `.where(fn)` against a probe builder. */
+    function predicateArgs(select: ReturnType<typeof makeSelectChain>, index: number) {
+      const predicate = select.where.mock.calls
+        .map((call) => call[0])
+        .filter((arg): arg is (eb: unknown) => unknown => typeof arg === 'function')[index];
+      expect(predicate).toBeDefined();
+
+      const calls: unknown[][] = [];
+      predicate!(
+        Object.assign(
+          (...args: unknown[]) => {
+            calls.push(args);
+            return 'cmp';
+          },
+          { or: vi.fn(), and: vi.fn(), not: vi.fn(), exists: vi.fn(), selectFrom: vi.fn() },
+        ),
+      );
+      return calls;
+    }
+
+    it('parks an EVM row once it has failed maxAttempts times', async () => {
+      const select = makeSelectChain([]);
+      const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
+
+      await repo.findDerivableBy(['ProposalCreated'], 50, 7);
+
+      expect(predicateArgs(select, 1)).toEqual([['derivation_attempt_count', '<', 7]]);
+    });
+
+    it('parks an off-chain row on the same ceiling', async () => {
+      const select = makeSelectChain([]);
+      const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
+
+      await repo.findDerivableByOffchain(['SnapshotProposalCreated'], 50, 7);
+
+      expect(predicateArgs(select, 1)).toEqual([['derivation_attempt_count', '<', 7]]);
+    });
+
+    it('counts parked rows per source type, inclusive of the ceiling', async () => {
+      const select = makeSelectChain([{ source_type: 'aave_governance_v3', count: '12' }]);
+      const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
+
+      await expect(repo.countExhausted(['ProposalQueued'], 50)).resolves.toEqual([
+        { source_type: 'aave_governance_v3', count: 12 },
+      ]);
+
+      expect(select.where).toHaveBeenCalledWith('derivation_attempt_count', '>=', 50);
+      expect(select.groupBy).toHaveBeenCalledWith('source_type');
+    });
+
+    it('does not query when no event types are requested', async () => {
+      const select = makeSelectChain([]);
+      const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
+
+      await expect(repo.countExhausted([], 50)).resolves.toEqual([]);
+      expect(select.selectFrom).not.toHaveBeenCalled();
     });
   });
 });

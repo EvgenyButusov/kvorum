@@ -19,6 +19,7 @@ import { derivationMetrics } from './derivation-metrics';
 
 const DERIVATION_INTERVAL_MS = readIntervalMs('DERIVATION_INTERVAL_MS', 5_000);
 const DEFAULT_DERIVATION_BATCH_SIZE = 50;
+const DEFAULT_MAX_DERIVATION_ATTEMPTS = 50;
 const PROGRESS_LOG_INTERVAL_MS = 30_000;
 
 type ChainContextRegistryLike = object;
@@ -66,11 +67,20 @@ export class DerivationWorkerService implements OnApplicationBootstrap {
       const batchSize = Number(
         process.env['DERIVATION_BATCH_SIZE'] ?? DEFAULT_DERIVATION_BATCH_SIZE,
       );
-      const watermark = await this.actorResolution.findDerivableBy(this.eventTypes, batchSize);
+      const maxAttempts = Number(
+        process.env['DERIVATION_MAX_ATTEMPTS'] ?? DEFAULT_MAX_DERIVATION_ATTEMPTS,
+      );
+      const watermark = await this.actorResolution.findDerivableBy(
+        this.eventTypes,
+        batchSize,
+        maxAttempts,
+      );
       const offchainWatermark = await this.actorResolution.findDerivableByOffchain(
         this.offchainEventTypes,
         batchSize,
+        maxAttempts,
       );
+      await this.recordParkedRows(maxAttempts);
       if (watermark.length === 0 && offchainWatermark.length === 0) {
         derivationMetrics.lagSeconds.record(0);
         return;
@@ -143,6 +153,22 @@ export class DerivationWorkerService implements OnApplicationBootstrap {
     } finally {
       derivationMetrics.tickDurationSeconds.record((Date.now() - startedAt) / 1000);
       this.inFlight = false;
+    }
+  }
+
+  /** A parked row is invisible to the queue, so the gauge is the only signal that it exists. */
+  private async recordParkedRows(maxAttempts: number): Promise<void> {
+    try {
+      const parked = await this.actorResolution.countExhausted(
+        [...this.eventTypes, ...this.offchainEventTypes],
+        maxAttempts,
+      );
+      for (const { source_type, count } of parked) {
+        derivationMetrics.parkedRows.record(count, { source_type });
+      }
+    } catch (err) {
+      // Observability must never stop derivation.
+      this.logger.warn('derivation_parked_count_failed', { error: String(err) });
     }
   }
 
