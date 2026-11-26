@@ -1,15 +1,17 @@
 import type { Logger } from '@libs/chain';
 import type { ProposalState } from '@libs/db';
 import { ProposalRepository } from '@libs/db';
-import type { ReconcileOutcome, StateReconciler } from '@sources/core';
+import type { ReconcileDriverMetrics, ReconcileOutcome, StateReconciler } from '@sources/core';
 import {
   GovernorStateDecodeError,
   decodeDelayResult,
   decodeGracePeriodResult,
+  decodeProposalDeadlineResult,
   decodeStateResult,
   decodeTimelockResult,
   encodeDelayCall,
   encodeGracePeriodCall,
+  encodeProposalDeadlineCall,
   encodeStateCall,
   encodeTimelockCall,
   mapGovernorStateCode,
@@ -32,6 +34,7 @@ export class CompoundStateReconciler implements StateReconciler<StaleReconciliat
     private readonly logger: Logger,
     readonly sourceTypes: readonly string[],
     private readonly proposalRepo: ProposalRepository,
+    private readonly metrics?: Pick<ReconcileDriverMetrics, 'recordOutcome'>,
   ) {}
 
   async reconcileRow(args: {
@@ -44,6 +47,16 @@ export class CompoundStateReconciler implements StateReconciler<StaleReconciliat
       chainCfg: { chainId: string };
     };
   }): Promise<ReconcileOutcome> {
+    const result = await this.reconcileRowCore(args);
+    // Only completed checks get the recheck watermark. RPC or database outages
+    // during timestamp lookup or state application must remain retryable.
+    await args.proposals.markReconcileChecked(args.row.id, args.confirmedThreshold.toString());
+    return result;
+  }
+
+  private async reconcileRowCore(
+    args: Parameters<CompoundStateReconciler['reconcileRow']>[0],
+  ): Promise<ReconcileOutcome> {
     const { row, chainCtx, proposals, confirmedThreshold, confirmedThresholdTag } = args;
     const mapped = await this.readOnchainState({
       sourceId: row.source_id,
@@ -52,7 +65,44 @@ export class CompoundStateReconciler implements StateReconciler<StaleReconciliat
       chainCtx,
     });
 
-    await proposals.markReconcileChecked(row.id, confirmedThreshold.toString());
+    let deadlineBlock = row.voting_ends_block;
+    let deadlineAt: Date | null = null;
+    if (row.source_type === 'compound_governor_oz') {
+      const raw = await chainCtx.client.send<string>('eth_call', [
+        { to: row.governor_address, data: encodeProposalDeadlineCall(row.source_id) },
+        confirmedThresholdTag,
+      ]);
+      deadlineBlock = decodeProposalDeadlineResult(raw);
+      if (BigInt(deadlineBlock) === 0n) {
+        throw new GovernorStateDecodeError('invalid zero proposal deadline', raw);
+      }
+      if (deadlineBlock !== row.voting_ends_block) {
+        if (BigInt(deadlineBlock) <= confirmedThreshold) {
+          deadlineAt = await this.readBlockTimestamp(chainCtx, deadlineBlock);
+        }
+        const changed = await proposals.updateVotingDeadline({
+          proposalId: row.id,
+          expectedBlock: row.voting_ends_block,
+          deadlineBlock,
+          deadlineAt,
+        });
+        if (!changed) return { outcome: 'guard_skipped' };
+        this.metrics?.recordOutcome({
+          source_type: row.source_type,
+          outcome: 'deadline_corrected',
+        });
+        this.logger.info('compound_deadline_reconciled', {
+          source_type: row.source_type,
+          source_id: row.source_id,
+          proposal_id: row.id,
+          chain_id: row.chain_id,
+          block: confirmedThreshold.toString(),
+          previous_deadline_block: row.voting_ends_block,
+          deadline_block: deadlineBlock,
+          deadline_at: deadlineAt?.toISOString() ?? null,
+        });
+      }
+    }
 
     if (row.eligible_voting_power === null && row.voting_starts_block !== null) {
       const totalSupplyHex = await chainCtx.client.send<string>('eth_call', [
@@ -61,6 +111,18 @@ export class CompoundStateReconciler implements StateReconciler<StaleReconciliat
       ]);
       const totalSupply = decodeTotalSupplyResult(totalSupplyHex);
       await this.proposalRepo.fillEligibleVotingPower(row.id, totalSupply.toString());
+      this.metrics?.recordOutcome({
+        source_type: row.source_type,
+        outcome: 'eligible_voting_power_filled',
+      });
+      this.logger.info('compound_eligible_voting_power_reconciled', {
+        source_type: row.source_type,
+        source_id: row.source_id,
+        proposal_id: row.id,
+        chain_id: row.chain_id,
+        block: row.voting_starts_block,
+        eligible_voting_power: totalSupply.toString(),
+      });
     }
 
     if (mapped === row.state) return { outcome: 'already_consistent' };
@@ -78,9 +140,13 @@ export class CompoundStateReconciler implements StateReconciler<StaleReconciliat
     }
 
     let stateUpdatedAt: Date | null = null;
-    if (mapped === 'defeated') {
-      if (row.voting_ends_block === null) return { outcome: 'guard_skipped' };
-      stateUpdatedAt = await this.readBlockTimestamp(chainCtx, row.voting_ends_block);
+    if (mapped === 'defeated' || mapped === 'succeeded') {
+      if (deadlineBlock === null) return { outcome: 'guard_skipped' };
+      // A successful vote closes without emitting a lifecycle event, just like defeat.
+      if (mapped === 'succeeded' && row.state !== 'pending' && row.state !== 'active') {
+        return { outcome: 'guard_skipped' };
+      }
+      stateUpdatedAt = deadlineAt ?? (await this.readBlockTimestamp(chainCtx, deadlineBlock));
     } else if (mapped === 'active') {
       if (row.voting_starts_block === null) return { outcome: 'guard_skipped' };
       stateUpdatedAt = await this.readBlockTimestamp(chainCtx, row.voting_starts_block);
@@ -102,11 +168,25 @@ export class CompoundStateReconciler implements StateReconciler<StaleReconciliat
 
     const updated = await proposals.reconcileState({
       proposalId: row.id,
-      expectedStates: ['pending', 'active', 'succeeded', 'queued'],
-      targetState: mapped as Extract<ProposalState, 'active' | 'defeated' | 'expired'>,
+      expectedStates: [row.state],
+      targetState: mapped as Extract<
+        ProposalState,
+        'active' | 'defeated' | 'expired' | 'succeeded'
+      >,
       stateUpdatedAt,
     });
     if (updated === 0) return { outcome: 'guard_skipped' };
+
+    this.logger.info('compound_state_reconciled', {
+      source_type: row.source_type,
+      source_id: row.source_id,
+      proposal_id: row.id,
+      chain_id: row.chain_id,
+      block: confirmedThreshold.toString(),
+      from_state: row.state,
+      to_state: mapped,
+      state_updated_at: stateUpdatedAt.toISOString(),
+    });
 
     return { outcome: 'corrected', fromState: row.state, toState: mapped };
   }

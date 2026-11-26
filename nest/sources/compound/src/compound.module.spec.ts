@@ -1,9 +1,12 @@
 import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderMetrics } from '@libs/observability';
 import { COMP_TOKEN_ADDRESS } from '@sources/compound';
 import type { SourcePlugin } from '@sources/core';
 import { COMPOUND_SOURCE_PLUGIN, CompoundSourceModule } from './compound.module';
+// Subject lives at nest/sources/; tested from here because that directory has no test target.
+import { recordDerivationOutcome } from '../../derivation-metrics';
 
 vi.mock('@libs/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@libs/db')>();
@@ -44,6 +47,32 @@ vi.mock('@libs/db', async (importOriginal) => {
 describe('CompoundSourceModule', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('records applier derivation outcomes, so a held row is observable', async () => {
+    recordDerivationOutcome({
+      source_type: 'compound_governor_oz',
+      event_type: 'VoteCast',
+      outcome: 'held',
+      reason: 'no_proposal',
+    });
+    recordDerivationOutcome({
+      source_type: 'compound_governor_oz',
+      event_type: 'ProposalQueued',
+      outcome: 'derived',
+      reason: null,
+    });
+
+    const series = (await renderMetrics())
+      .split('\n')
+      .filter((line) => line.includes('derivation_processed_total{'));
+
+    expect(
+      series.some((l) => l.includes('outcome="held"') && l.includes('reason="no_proposal"')),
+    ).toBe(true);
+    expect(series.some((l) => l.includes('outcome="derived"') && l.includes('reason="none"'))).toBe(
+      true,
+    );
   });
 
   it('M1 compiles testing module', async () => {

@@ -56,6 +56,17 @@ export interface ReconcileDriverMetrics {
   }): void;
   recordRpcFailEscalated(sourceType: string): void;
   recordTickDurationSeconds(seconds: number): void;
+  // Archive-completeness audit telemetry. Optional so the many driver stubs in source tests need
+  // not implement it; the shared buildDriverMetrics() always supplies both.
+  recordArchiveAuditLag?(sourceType: string, blocks: number): void;
+  recordArchiveRepair?(labels: ArchiveRepairLabels): void;
+}
+
+/** Labels for one repaired archive event. Bounded: no identifiers, addresses or hashes. */
+export interface ArchiveRepairLabels {
+  source_type: string;
+  event_type: string;
+  missing_store: 'postgres' | 'clickhouse' | 'both';
 }
 
 export interface ReconcileDriverConfig {

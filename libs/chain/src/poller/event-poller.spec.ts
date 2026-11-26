@@ -143,8 +143,7 @@ describe('EventPoller', () => {
       expect(received).toHaveLength(0);
     });
 
-    it('drops logs with unparseable blockNumber instead of crashing the tick', async () => {
-      // blockNumber=null would crash BigInt() in the old code path; ensure we drop + keep going.
+    it('rejects the entire range when a log has an unparseable blockNumber', async () => {
       const malformed = { ...makeLog(), blockNumber: null };
       const goodLog = makeLog({ logIndex: '0x1' });
       fake.enqueueSuccess('0x10').enqueueSuccess([malformed, goodLog]);
@@ -158,8 +157,7 @@ describe('EventPoller', () => {
       await expect(poller.start()).resolves.toBeUndefined();
       await poller.stop();
 
-      expect(received).toHaveLength(1);
-      expect(received[0]!.logIndex).toBe(1);
+      expect(received).toHaveLength(0);
     });
 
     it('drops logs with non-array topics instead of crashing the tick', async () => {
@@ -418,6 +416,13 @@ describe('EventPoller', () => {
       // blocks 401..963 would never be read.
       expect(ranges).toEqual([{ from: 401n, to: 988n }]);
       expect(cursor.value).toBe(988n);
+    });
+
+    it('leaves the cursor unchanged when a log cannot be decoded', async () => {
+      const { rpcClient } = stubClient(1_000n, [{ ...makeLog(), blockNumber: null }]);
+      const cursor = memoryCursor(900n);
+      await runOneTick({ cursor: cursor.store }, rpcClient);
+      expect(cursor.value).toBe(900n);
     });
 
     it('caps each chunk at maxBlocksPerTick while walking a backlog', async () => {

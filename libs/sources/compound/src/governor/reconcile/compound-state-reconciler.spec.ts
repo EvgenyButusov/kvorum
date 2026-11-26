@@ -19,11 +19,105 @@ function makeProposalRepo() {
 }
 
 describe('CompoundStateReconciler', () => {
-  it('reconciles oz governor row to defeated using voting_ends_block timestamp', async () => {
+  it.each([
+    { code: 1n, deadline: '1200', at: null, mapped: 'active' },
+    { code: 4n, deadline: '900', at: new Date(100_000), mapped: 'succeeded' },
+  ] as const)(
+    'reconciles an extended OZ deadline ($mapped)',
+    async ({ code, deadline, at, mapped }) => {
+      const logger = makeLogger();
+      const metrics = { recordOutcome: vi.fn() };
+      const reconciler = new CompoundStateReconciler(
+        logger,
+        ['compound_governor_oz'],
+        makeProposalRepo() as never,
+        metrics,
+      );
+      const proposals = {
+        markReconcileChecked: vi.fn(),
+        updateVotingDeadline: vi.fn().mockResolvedValue(true),
+        reconcileState: vi.fn().mockResolvedValue(1),
+      };
+      const send = vi.fn(async (method: string, params: unknown[]) => {
+        if (method === 'eth_getBlockByNumber') return { timestamp: '0x64' };
+        const call = params[0] as { data: string };
+        if (call.data === GOVERNOR_STATE_INTERFACE.encodeFunctionData('state', [610n])) {
+          return GOVERNOR_STATE_INTERFACE.encodeFunctionResult('state', [code]);
+        }
+        if (call.data === GOVERNOR_STATE_INTERFACE.encodeFunctionData('proposalDeadline', [610n])) {
+          return GOVERNOR_STATE_INTERFACE.encodeFunctionResult('proposalDeadline', [
+            BigInt(deadline),
+          ]);
+        }
+        throw new Error('unexpected RPC');
+      });
+      const result = await reconciler.reconcileRow({
+        row: {
+          id: 'p610',
+          source_id: '610',
+          source_type: 'compound_governor_oz',
+          chain_id: '0x1',
+          governor_address: '0x309a862bbc1a00e45506cb8a802d1ff10004c8c0',
+          state: 'active',
+          voting_starts_block: '100',
+          voting_ends_block: '800',
+          queued_at_block: null,
+          eligible_voting_power: '1000',
+          primary_token_address: TOKEN,
+        },
+        confirmedThreshold: 1000n,
+        confirmedThresholdTag: '0x3e8',
+        proposals: proposals as never,
+        chainCtx: { client: { send }, chainCfg: { chainId: '0x1' } },
+      });
+      expect(proposals.updateVotingDeadline).toHaveBeenCalledWith({
+        proposalId: 'p610',
+        expectedBlock: '800',
+        deadlineBlock: deadline,
+        deadlineAt: at,
+      });
+      expect(metrics.recordOutcome).toHaveBeenCalledExactlyOnceWith({
+        source_type: 'compound_governor_oz',
+        outcome: 'deadline_corrected',
+      });
+      expect(logger.info).toHaveBeenCalledWith(
+        'compound_deadline_reconciled',
+        expect.objectContaining({
+          source_id: '610',
+          previous_deadline_block: '800',
+          deadline_block: deadline,
+        }),
+      );
+      if (mapped === 'active') {
+        expect(result).toEqual({ outcome: 'already_consistent' });
+        expect(proposals.reconcileState).not.toHaveBeenCalled();
+        expect(send).not.toHaveBeenCalledWith('eth_getBlockByNumber', expect.anything());
+      } else {
+        expect(result).toEqual({ outcome: 'corrected', fromState: 'active', toState: 'succeeded' });
+        expect(logger.info).toHaveBeenCalledWith(
+          'compound_state_reconciled',
+          expect.objectContaining({
+            source_id: '610',
+            from_state: 'active',
+            to_state: 'succeeded',
+          }),
+        );
+        expect(proposals.reconcileState).toHaveBeenCalledWith({
+          proposalId: 'p610',
+          expectedStates: ['active'],
+          targetState: 'succeeded',
+          stateUpdatedAt: at,
+        });
+        expect(send).toHaveBeenCalledWith('eth_getBlockByNumber', ['0x384', false]);
+      }
+    },
+  );
+
+  it('reconciles bravo governor row to defeated using voting_ends_block timestamp', async () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -44,9 +138,9 @@ describe('CompoundStateReconciler', () => {
 
     const result = await reconciler.reconcileRow({
       row: {
-        id: 'proposal-oz-1',
+        id: 'proposal-bravo-1',
         source_id: '394',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0x309a862bbC1A00e45506cB8A802D1ff10004c8C0',
         state: 'pending',
@@ -70,10 +164,10 @@ describe('CompoundStateReconciler', () => {
       fromState: 'pending',
       toState: 'defeated',
     });
-    expect(proposals.markReconcileChecked).toHaveBeenCalledWith('proposal-oz-1', '21699999');
+    expect(proposals.markReconcileChecked).toHaveBeenCalledWith('proposal-bravo-1', '21699999');
     expect(proposals.reconcileState).toHaveBeenCalledWith({
-      proposalId: 'proposal-oz-1',
-      expectedStates: ['pending', 'active', 'succeeded', 'queued'],
+      proposalId: 'proposal-bravo-1',
+      expectedStates: ['pending'],
       targetState: 'defeated',
       stateUpdatedAt: new Date(100_000),
     });
@@ -83,7 +177,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -102,7 +196,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p1',
         source_id: '1',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'pending',
@@ -126,7 +220,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -142,7 +236,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p2',
         source_id: '2',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'pending',
@@ -165,7 +259,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -181,7 +275,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p3',
         source_id: '3',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'queued',
@@ -204,7 +298,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -220,7 +314,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p4',
         source_id: '4',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'pending',
@@ -243,7 +337,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -259,7 +353,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p5',
         source_id: '5',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'pending',
@@ -282,7 +376,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -302,7 +396,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p6',
         source_id: '6',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'pending',
@@ -325,7 +419,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -346,7 +440,7 @@ describe('CompoundStateReconciler', () => {
         row: {
           id: 'p7',
           source_id: '7',
-          source_type: 'compound_governor_oz',
+          source_type: 'compound_governor_bravo',
           chain_id: '0x1',
           governor_address: '0xGov',
           state: 'pending',
@@ -369,7 +463,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -395,7 +489,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p8',
         source_id: '8',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'queued',
@@ -419,7 +513,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p9',
         source_id: '9',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'queued',
@@ -443,7 +537,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -470,7 +564,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p10',
         source_id: '10',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'queued',
@@ -493,7 +587,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -517,7 +611,7 @@ describe('CompoundStateReconciler', () => {
         row: {
           id: 'p11',
           source_id: '11',
-          source_type: 'compound_governor_oz',
+          source_type: 'compound_governor_bravo',
           chain_id: '0x1',
           governor_address: '0xGov',
           state: 'queued',
@@ -535,11 +629,59 @@ describe('CompoundStateReconciler', () => {
     ).rejects.toThrow(GovernorStateDecodeError);
   });
 
-  it('returns guard_skipped when mapped state has no timestamp branch (e.g. succeeded)', async () => {
+  it.each(['pending', 'active'] as const)(
+    'reconciles %s to succeeded using the voting end block timestamp',
+    async (state) => {
+      const reconciler = new CompoundStateReconciler(
+        makeLogger() as never,
+        ['compound_governor_bravo'],
+        makeProposalRepo() as never,
+      );
+      const proposals = {
+        markReconcileChecked: vi.fn().mockResolvedValue(undefined),
+        reconcileState: vi.fn().mockResolvedValue(1),
+      };
+      const send = vi.fn(async (method: string) => {
+        if (method === 'eth_call')
+          return GOVERNOR_STATE_INTERFACE.encodeFunctionResult('state', [4n]);
+        if (method === 'eth_getBlockByNumber') return { timestamp: '0x64' };
+        throw new Error(`unexpected RPC call: ${method}`);
+      });
+      const result = await reconciler.reconcileRow({
+        row: {
+          id: 'proposal-bravo-success',
+          source_id: '610',
+          source_type: 'compound_governor_bravo',
+          chain_id: '0x1',
+          governor_address: '0xGov',
+          state,
+          voting_starts_block: '100',
+          voting_ends_block: '200',
+          queued_at_block: null,
+          eligible_voting_power: '1000',
+          primary_token_address: TOKEN,
+        },
+        confirmedThreshold: 999n,
+        confirmedThresholdTag: '0x3e7',
+        proposals: proposals as never,
+        chainCtx: { client: { send }, chainCfg: { chainId: '0x1' } },
+      });
+      expect(result).toEqual({ outcome: 'corrected', fromState: state, toState: 'succeeded' });
+      expect(send).toHaveBeenCalledWith('eth_getBlockByNumber', ['0xc8', false]);
+      expect(proposals.reconcileState).toHaveBeenCalledWith({
+        proposalId: 'proposal-bravo-success',
+        expectedStates: [state],
+        targetState: 'succeeded',
+        stateUpdatedAt: new Date(100_000),
+      });
+    },
+  );
+
+  it('returns guard_skipped for succeeded when voting_ends_block is null', async () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -547,18 +689,16 @@ describe('CompoundStateReconciler', () => {
       reconcileState: vi.fn(),
     };
 
-    const send = vi.fn(
-      async () => GOVERNOR_STATE_INTERFACE.encodeFunctionResult('state', [4n]), // succeeded → no timestamp branch
-    );
+    const send = vi.fn(async () => GOVERNOR_STATE_INTERFACE.encodeFunctionResult('state', [4n]));
 
     const result = await reconciler.reconcileRow({
       row: {
         id: 'p99',
         source_id: '99',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
-        state: 'active', // local active, on-chain succeeded → stateUpdatedAt stays null
+        state: 'active',
         voting_starts_block: null,
         voting_ends_block: null,
         queued_at_block: null,
@@ -578,7 +718,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -601,7 +741,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p100',
         source_id: '100',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'queued',
@@ -625,7 +765,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -646,9 +786,9 @@ describe('CompoundStateReconciler', () => {
 
     const result = await reconciler.reconcileRow({
       row: {
-        id: 'proposal-oz-2',
+        id: 'proposal-bravo-2',
         source_id: '584',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0x309a862bbC1A00e45506cB8A802D1ff10004c8C0',
         state: 'pending',
@@ -668,10 +808,10 @@ describe('CompoundStateReconciler', () => {
     });
 
     expect(result).toEqual({ outcome: 'corrected', fromState: 'pending', toState: 'active' });
-    expect(proposals.markReconcileChecked).toHaveBeenCalledWith('proposal-oz-2', '21710000');
+    expect(proposals.markReconcileChecked).toHaveBeenCalledWith('proposal-bravo-2', '21710000');
     expect(proposals.reconcileState).toHaveBeenCalledWith({
-      proposalId: 'proposal-oz-2',
-      expectedStates: ['pending', 'active', 'succeeded', 'queued'],
+      proposalId: 'proposal-bravo-2',
+      expectedStates: ['pending'],
       targetState: 'active',
       stateUpdatedAt: new Date(100_000),
     });
@@ -682,10 +822,13 @@ describe('CompoundStateReconciler', () => {
 
   it('fills eligible_voting_power when null and voting_starts_block is set', async () => {
     const proposalRepo = makeProposalRepo();
+    const logger = makeLogger();
+    const metrics = { recordOutcome: vi.fn() };
     const reconciler = new CompoundStateReconciler(
-      makeLogger() as never,
-      ['compound_governor_oz'],
+      logger,
+      ['compound_governor_bravo'],
       proposalRepo as never,
+      metrics,
     );
     const proposals = {
       markReconcileChecked: vi.fn().mockResolvedValue(undefined),
@@ -710,7 +853,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p-vp',
         source_id: '42',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'pending',
@@ -730,6 +873,14 @@ describe('CompoundStateReconciler', () => {
       'p-vp',
       totalSupply.toString(),
     );
+    expect(metrics.recordOutcome).toHaveBeenCalledExactlyOnceWith({
+      source_type: 'compound_governor_bravo',
+      outcome: 'eligible_voting_power_filled',
+    });
+    expect(logger.info).toHaveBeenCalledWith(
+      'compound_eligible_voting_power_reconciled',
+      expect.objectContaining({ source_id: '42', eligible_voting_power: totalSupply.toString() }),
+    );
     const tokenCalls = send.mock.calls.filter(
       ([m, p]) =>
         m === 'eth_call' &&
@@ -744,7 +895,7 @@ describe('CompoundStateReconciler', () => {
     const proposalRepo = makeProposalRepo();
     const reconciler = new CompoundStateReconciler(
       makeLogger() as never,
-      ['compound_governor_oz'],
+      ['compound_governor_bravo'],
       proposalRepo as never,
     );
     const proposals = {
@@ -763,7 +914,7 @@ describe('CompoundStateReconciler', () => {
       row: {
         id: 'p-vp-skip',
         source_id: '43',
-        source_type: 'compound_governor_oz',
+        source_type: 'compound_governor_bravo',
         chain_id: '0x1',
         governor_address: '0xGov',
         state: 'pending',

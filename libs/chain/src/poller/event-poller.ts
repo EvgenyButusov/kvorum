@@ -143,9 +143,6 @@ export class EventPoller extends AbstractPoller {
       return false;
     }
 
-    this.lastSuccessAt = new Date();
-    chainMetrics.logPollLag.record(0, { chain, dao_source: src });
-
     const now = Date.now();
     const behind = headBn - toBn;
     if (
@@ -175,8 +172,9 @@ export class EventPoller extends AbstractPoller {
         events.push(decodeLogEvent(log, sourceType, chainId));
       } catch (err) {
         this.logger.error(
-          `[chain:${chain}][source:${src}] EventPoller dropping malformed log: ${String(err)}`,
+          `[chain:${chain}][source:${src}] EventPoller rejecting malformed range: ${String(err)}`,
         );
+        return false;
       }
     }
 
@@ -202,6 +200,8 @@ export class EventPoller extends AbstractPoller {
     if (!allListenersFulfilled) return false;
 
     await this.advanceCursor(toBn);
+    this.lastSuccessAt = new Date();
+    chainMetrics.logPollLag.record(0, { chain, dao_source: src });
 
     if (!this.firstTickFired) {
       this.firstTickFired = true;

@@ -8,12 +8,8 @@ import {
   VoteEventsProjectionReadRepository,
   VoteEventsProjectionWriter,
 } from '@libs/db';
-import {
-  VoteBlockTimestampFetcher,
-  ProjectionError,
-  buildVoteRows,
-  isNewerVote,
-} from '@sources/core';
+import { VoteBlockTimestampFetcher, buildVoteRows, isNewerVote } from '@sources/core';
+import { decideMissingProposalHold } from './hold-policy';
 import type { VoteCastPayload } from './types';
 import {
   GovernorArchivePayloadRepository,
@@ -23,7 +19,7 @@ import {
 const DLQ_THRESHOLD = Number(process.env['VOTE_PROJECTION_DLQ_THRESHOLD'] ?? '5');
 const VOTE_PROJECTION_STAGE = 'vote_projection_stage';
 
-export type CompoundVoteDerivationOutcome = 'derived' | 'skipped_idempotent' | 'failed';
+export type CompoundVoteDerivationOutcome = 'derived' | 'skipped_idempotent' | 'failed' | 'held';
 export type CompoundVoteDerivationFailureReason =
   | 'payload_missing'
   | 'decode_error'
@@ -158,7 +154,20 @@ export class GovernorVoteProjectionApplier {
         sourceType: row.source_type,
         sourceId: event.proposalId,
       });
-      if (proposal === undefined) throw new ProjectionError('no_proposal');
+      if (proposal === undefined) {
+        const decision = decideMissingProposalHold(row.received_at);
+        if (decision.action === 'escalate') {
+          await this.failAndMaybeDlq(
+            row,
+            'no_proposal',
+            new Error(`parent proposal absent ${decision.waitedMs}ms after ingestion`),
+          );
+          return;
+        }
+        await this.archive.markHeld(row.id, decision.until);
+        this.record(row, 'held', 'no_proposal');
+        return;
+      }
 
       const voterAddress = event.voter.toLowerCase();
       const current = await this.voteEventsProjectionReadRepository.findCurrentVote({
@@ -202,11 +211,7 @@ export class GovernorVoteProjectionApplier {
 
       this.record(row, incomingIsNewer ? 'derived' : 'skipped_idempotent', null);
     } catch (error) {
-      const reason: CompoundVoteDerivationFailureReason =
-        error instanceof ProjectionError && error.reason === 'no_proposal'
-          ? 'no_proposal'
-          : 'projection_apply_error';
-      await this.failAndMaybeDlq(row, reason, error);
+      await this.failAndMaybeDlq(row, 'projection_apply_error', error);
     }
   }
 

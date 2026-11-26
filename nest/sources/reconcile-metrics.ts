@@ -22,6 +22,14 @@ export const stateReconcilerMetrics = {
     name: 'state_reconcile_rpc_calls',
     description: 'RPC calls made by proposal state reconciler, split by method',
   }),
+  archiveAuditLag: defineGauge({
+    name: 'archive_audit_lag_blocks',
+    description: 'Blocks remaining behind the safe archive-completeness audit target',
+  }),
+  archiveEventsRepaired: defineCounter({
+    name: 'archive_audit_events_repaired',
+    description: 'Individual missing archive events restored and verified in both stores',
+  }),
   stateReconcileTickDurationSeconds: defineHistogram({
     name: 'state_reconcile_tick_duration_seconds',
     description: 'Wall-clock duration of one state reconciliation tick',
@@ -38,5 +46,9 @@ export function buildDriverMetrics(): ReconcileDriverMetrics {
       stateReconcilerMetrics.stateReconcileRpcFailEscalated.add(1, { source_type: sourceType }),
     recordTickDurationSeconds: (seconds) =>
       stateReconcilerMetrics.stateReconcileTickDurationSeconds.record(seconds),
+    recordArchiveAuditLag: (sourceType, blocks) =>
+      stateReconcilerMetrics.archiveAuditLag.record(blocks, { source_type: sourceType }),
+    recordArchiveRepair: (labels) =>
+      stateReconcilerMetrics.archiveEventsRepaired.add(1, { ...labels }),
   };
 }

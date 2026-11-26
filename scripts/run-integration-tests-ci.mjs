@@ -28,6 +28,7 @@ try {
         'run',
         '--config',
         pkg.config,
+        '--reporter=default',
         '--reporter=json',
         `--outputFile=${outputFile}`,
       ],

@@ -49,6 +49,7 @@ describe('TimestampFillerService', () => {
         id: 'proposal-1',
         voting_starts_at: new Date(100_000),
         voting_ends_at: new Date(200_000),
+        expectedVotingEndsBlock: '11',
       },
     ]);
   });

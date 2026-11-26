@@ -53,6 +53,8 @@ export interface TimestampFillInput {
   id: string;
   voting_starts_at: Date | null;
   voting_ends_at: Date | null;
+  /** Prevent a block-derived timestamp from racing a voting deadline extension. */
+  expectedVotingEndsBlock?: string | null;
 }
 
 export interface ProposalSourceLookupInput {
@@ -139,9 +141,9 @@ export class ProposalRepository {
       readonly ProposalState[]
     > = {
       active: ['pending'],
-      queued: ['pending', 'active'],
-      executed: ['pending', 'queued', 'active'],
-      canceled: ['pending', 'queued', 'active'],
+      queued: ['pending', 'active', 'succeeded'],
+      executed: ['pending', 'queued', 'active', 'succeeded'],
+      canceled: ['pending', 'queued', 'active', 'succeeded'],
       defeated: ['pending', 'active'],
     };
     const allowedCurrentStates = allowedFromByTarget[input.targetState];
@@ -363,7 +365,7 @@ export class ProposalRepository {
 
   async fillTimestamps(rows: readonly TimestampFillInput[]): Promise<void> {
     for (const row of rows) {
-      await this.db
+      let query = this.db
         .updateTable('proposal')
         .set((eb) => ({
           voting_starts_at:
@@ -376,8 +378,15 @@ export class ProposalRepository {
               : eb.fn('coalesce', [eb.ref('voting_ends_at'), eb.val(row.voting_ends_at)]),
           updated_at: sql<Date>`now()`,
         }))
-        .where('id', '=', row.id)
-        .execute();
+        .where('id', '=', row.id);
+      if (row.expectedVotingEndsBlock !== undefined) {
+        query = query.where(
+          'voting_ends_block',
+          'is not distinct from',
+          row.expectedVotingEndsBlock,
+        );
+      }
+      await query.execute();
     }
   }
 }

@@ -204,4 +204,29 @@ describe('makeIngesterListener', () => {
     await listener([]);
     expect(writer.write as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
+  it('rejects strict batches when neither archive nor DLQ persisted', async () => {
+    const listener = makeIngesterListener(
+      {
+        archiveWriter: makeWriter(async () => ({ result: 'unreachable' })),
+        context: CTX,
+        logger: silentLogger,
+        dlqRepo: makeDlqRepo(),
+      },
+      decode,
+      { onWriteFailure: 'throw' },
+    );
+    await expect(listener([makeLog()])).rejects.toThrow('both unreachable');
+  });
+  it('rejects strict batches when a decode failure cannot be persisted', async () => {
+    const dlqRepo = makeDlqRepo();
+    vi.mocked(dlqRepo.insert).mockRejectedValue(new Error('DLQ down'));
+    const listener = makeIngesterListener(
+      { archiveWriter: makeWriter(), context: CTX, logger: silentLogger, dlqRepo },
+      () => {
+        throw new Error('bad decode');
+      },
+      { onWriteFailure: 'throw' },
+    );
+    await expect(listener([makeLog()])).rejects.toThrow('bad decode');
+  });
 });

@@ -116,7 +116,10 @@ export class BackfillRangeFetcher {
         try {
           events.push(decodeLogEvent(raw as Record<string, unknown>, sourceType, chainId));
         } catch (err) {
-          logger?.error(`[backfill][source:${sourceLabel}] dropping malformed log: ${String(err)}`);
+          logger?.error(
+            `[backfill][source:${sourceLabel}] rejecting malformed range: ${String(err)}`,
+          );
+          throw err;
         }
       }
 

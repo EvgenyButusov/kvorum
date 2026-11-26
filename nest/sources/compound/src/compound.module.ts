@@ -17,6 +17,7 @@ import {
   CompTokenEventRepository,
   CompTokenDelegationProjectionApplier,
   CompoundProposalRepository,
+  CompoundArchiveReconcileRepository,
   GovernorArchivePayloadRepository,
   GovernorArchiveWriter,
   GovernorEventRepository,
@@ -33,6 +34,8 @@ import type { SourcePlugin } from '@sources/core';
 import { ChainContextModule } from '@nest/chain';
 import { toChainLogger } from '@nest/chain';
 import { DbModule } from '@nest/db';
+import { createReconcileLogger } from './compound-reconcile-logger';
+import { recordDerivationOutcome } from '../../derivation-metrics';
 import { buildDriverMetrics } from '../../reconcile-metrics';
 
 export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
@@ -88,19 +91,20 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
     },
     {
       provide: GovernorProjectionApplier,
-      useFactory: (archive: ArchiveDerivationRepository) =>
+      useFactory: (archive: ArchiveDerivationRepository, registry: ChainContextRegistry) =>
         new GovernorProjectionApplier({
           pgDb,
           chDb,
           archive,
           payloads: new GovernorArchivePayloadRepository(chDb),
+          registry,
           metrics: {
             batchLookupSeconds: () => undefined,
-            processed: () => undefined,
+            processed: recordDerivationOutcome,
           },
           logger: toChainLogger(new Logger('GovernorProjectionApplier')),
         }),
-      inject: [ArchiveDerivationRepository],
+      inject: [ArchiveDerivationRepository, ChainContextRegistry],
     },
     {
       provide: GovernorVoteProjectionApplier,
@@ -123,7 +127,7 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
           metrics: {
             batchLookupSeconds: () => undefined,
             chWriteSeconds: () => undefined,
-            processed: () => undefined,
+            processed: recordDerivationOutcome,
           },
           logger: toChainLogger(new Logger('GovernorVoteProjectionApplier')),
         }),
@@ -148,7 +152,7 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
           metrics: {
             batchLookupSeconds: () => undefined,
             chWriteSeconds: () => undefined,
-            processed: () => undefined,
+            processed: recordDerivationOutcome,
           },
           logger: toChainLogger(new Logger('CompTokenDelegationProjectionApplier')),
         }),
@@ -168,8 +172,19 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
       ): SourcePlugin => {
         const governorPayloads = new GovernorArchivePayloadRepository(chDb);
         const compTokenPayloads = new CompTokenArchivePayloadRepository(chDb);
-        const reconcileLogger = toChainLogger(new Logger('CompoundReconcile'));
+        const reconcileLogger = createReconcileLogger('CompoundReconcile');
         const metrics = buildDriverMetrics();
+        const archiveRepository = new CompoundArchiveReconcileRepository(pgDb, chDb);
+        // One shared literal: the three governor variants differ only by factory, so a dependency
+        // added to two of three cannot drift apart.
+        const reconcileDeps = {
+          archiveRepository,
+          archiveWriter,
+          proposals: proposalRepo,
+          proposalRepo: sharedProposalRepo,
+          metrics,
+          logger: reconcileLogger,
+        };
         const logger = new Logger('CompoundSourceModule');
         logger.log('compound_comp_token plugin registered');
 
@@ -186,24 +201,9 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
               dlqRepo,
               logger: toChainLogger(new Logger('CompTokenIngester')),
             }),
-            createCompoundGovernorBravoReconcilePlugin({
-              proposals: proposalRepo,
-              proposalRepo: sharedProposalRepo,
-              metrics,
-              logger: reconcileLogger,
-            }),
-            createCompoundGovernorOzReconcilePlugin({
-              proposals: proposalRepo,
-              proposalRepo: sharedProposalRepo,
-              metrics,
-              logger: reconcileLogger,
-            }),
-            createCompoundGovernorAlphaReconcilePlugin({
-              proposals: proposalRepo,
-              proposalRepo: sharedProposalRepo,
-              metrics,
-              logger: reconcileLogger,
-            }),
+            createCompoundGovernorBravoReconcilePlugin(reconcileDeps),
+            createCompoundGovernorOzReconcilePlugin(reconcileDeps),
+            createCompoundGovernorAlphaReconcilePlugin(reconcileDeps),
           ],
           derivers: [
             projectionApplier,

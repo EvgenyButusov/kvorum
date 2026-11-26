@@ -3,6 +3,7 @@ import type { ProposalState } from '@libs/db';
 
 export const GOVERNOR_STATE_INTERFACE = new Interface([
   'function state(uint256) view returns (uint8)',
+  'function proposalDeadline(uint256) view returns (uint256)',
   'function timelock() view returns (address)',
 ]);
 
@@ -31,6 +32,19 @@ export function decodeStateResult(data: string): number {
     return Number(stateCode);
   } catch (err) {
     throw new GovernorStateDecodeError('failed to decode governor state() result', err);
+  }
+}
+
+export function encodeProposalDeadlineCall(sourceId: string): string {
+  return GOVERNOR_STATE_INTERFACE.encodeFunctionData('proposalDeadline', [BigInt(sourceId)]);
+}
+
+export function decodeProposalDeadlineResult(data: string): string {
+  try {
+    const [deadline] = GOVERNOR_STATE_INTERFACE.decodeFunctionResult('proposalDeadline', data);
+    return (deadline as bigint).toString();
+  } catch (err) {
+    throw new GovernorStateDecodeError('failed to decode governor proposalDeadline() result', err);
   }
 }
 

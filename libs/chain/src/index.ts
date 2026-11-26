@@ -61,6 +61,7 @@ export type { LogDepthProbeInput, LogDepthProbeResult } from './backfill/probe-l
 export type { ChainContext } from './chain-context-registry.js';
 export { ChainContextRegistry } from './chain-context-registry.js';
 export { readConfirmedHead } from './confirmed-head.js';
+export { decodeLogEvent } from './poller/utils/decode.utils.js';
 
 export {
   EnsClient,

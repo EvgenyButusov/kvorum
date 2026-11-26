@@ -16,6 +16,7 @@ import type {
 } from './domain';
 import type {
   ArchiveEventTable,
+  ArchiveReconcileCursorTable,
   IngestionDlqResolvedTable,
   IngestionDlqTable,
   OffChainCursorTable,
@@ -91,6 +92,9 @@ export type {
   OffChainCursorTable,
   NewOffChainCursor,
   OffChainCursorUpdate,
+  ArchiveReconcileCursor,
+  ArchiveReconcileCursorTable,
+  NewArchiveReconcileCursor,
 } from './ingestion';
 export type {
   ActorAddress,
@@ -120,6 +124,7 @@ export interface PgDatabase {
   ingestion_dlq: IngestionDlqTable;
   ingestion_dlq_resolved: IngestionDlqResolvedTable;
   off_chain_cursor: OffChainCursorTable;
+  archive_reconcile_cursor: ArchiveReconcileCursorTable;
   abi_cache: AbiCacheTable;
   selector_index: SelectorIndexTable;
   actor_address: ActorAddressTable;

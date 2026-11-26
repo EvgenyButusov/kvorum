@@ -81,7 +81,12 @@ export class TimestampFillerService implements OnApplicationBootstrap {
       ]);
 
       if (startsAt !== null || endsAt !== null) {
-        updates.push({ id: row.id, voting_starts_at: startsAt, voting_ends_at: endsAt });
+        updates.push({
+          id: row.id,
+          voting_starts_at: startsAt,
+          voting_ends_at: endsAt,
+          ...(endsAt !== null ? { expectedVotingEndsBlock: row.voting_ends_block } : {}),
+        });
       }
     }
 

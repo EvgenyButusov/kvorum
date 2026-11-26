@@ -27,6 +27,7 @@ export type {
   BaseStaleReconciliationRow,
   ReconcileBound,
   ReconcileDriverConfig,
+  ArchiveRepairLabels,
   ReconcileDriverMetrics,
   ReconcileOutcome,
   ReconcilePerChainBound,

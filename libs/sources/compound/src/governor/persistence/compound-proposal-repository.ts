@@ -24,7 +24,7 @@ export interface StaleReconciliationRow extends BaseStaleReconciliationRow {
 export interface ReconcileStateInput {
   proposalId: string;
   expectedStates: readonly ProposalState[];
-  targetState: Extract<ProposalState, 'defeated' | 'expired' | 'active'>;
+  targetState: Extract<ProposalState, 'defeated' | 'expired' | 'active' | 'succeeded'>;
   stateUpdatedAt: Date;
 }
 
@@ -90,6 +90,12 @@ export class CompoundProposalRepository
                   eb('proposal.voting_starts_block', 'is not', null),
                   eb('proposal.voting_starts_block', '<', bound.confirmedThresholdBlock),
                 ]),
+                // OZ can extend voting after creation. Recheck active windows
+                // at the existing rate limit, even before the stored deadline.
+                eb.and([
+                  eb('proposal.source_type', '=', 'compound_governor_oz'),
+                  eb('proposal.state', '=', 'active'),
+                ]),
                 eb.and([
                   eb('proposal.state', '=', 'queued'),
                   eb.or([
@@ -132,6 +138,26 @@ export class CompoundProposalRepository
       .executeTakeFirst();
 
     return Number(result?.numUpdatedRows ?? 0n);
+  }
+
+  async updateVotingDeadline(input: {
+    proposalId: string;
+    expectedBlock: string | null;
+    deadlineBlock: string;
+    deadlineAt: Date | null;
+  }): Promise<boolean> {
+    const result = await this.db
+      .updateTable('proposal')
+      .set({
+        voting_ends_block: input.deadlineBlock,
+        voting_ends_at: input.deadlineAt,
+        updated_at: sql<Date>`now()`,
+      })
+      .where('id', '=', input.proposalId)
+      .where('source_type', '=', 'compound_governor_oz')
+      .where('voting_ends_block', 'is not distinct from', input.expectedBlock)
+      .executeTakeFirst();
+    return Number(result?.numUpdatedRows ?? 0n) > 0;
   }
 
   async markReconcileChecked(proposalId: string, confirmedThreshold: string): Promise<void> {

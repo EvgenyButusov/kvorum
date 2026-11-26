@@ -128,6 +128,27 @@ describe('CompoundProposalRepository', () => {
     });
   });
 
+  it('updates an extended OZ deadline only if the previously observed block is unchanged', async () => {
+    const { db, chain } = makeDb();
+    const repo = new CompoundProposalRepository(db as never);
+    await expect(
+      repo.updateVotingDeadline({
+        proposalId: 'p1',
+        expectedBlock: '800',
+        deadlineBlock: '1200',
+        deadlineAt: null,
+      }),
+    ).resolves.toBe(true);
+    expect(chain.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        voting_ends_block: '1200',
+        voting_ends_at: null,
+      }),
+    );
+    expect(chain.where).toHaveBeenCalledWith('source_type', '=', 'compound_governor_oz');
+    expect(chain.where).toHaveBeenCalledWith('voting_ends_block', 'is not distinct from', '800');
+  });
+
   describe('upsertQueuedAtBlock', () => {
     it('inserts queued_at_block resolved from proposal table via SELECT subquery', async () => {
       const { db, chain } = makeDb();

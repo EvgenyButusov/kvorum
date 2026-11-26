@@ -6,13 +6,18 @@ import {
   type ReconcileDriverMetrics,
   type SourceIngester,
 } from '@sources/core';
+import { CompoundArchiveReconciler } from './compound-archive-reconciler';
 import { CompoundStateReconciler } from './compound-state-reconciler';
+import type { GovernorArchiveWriter } from '../ingestion/archive-writer';
+import type { CompoundArchiveReconcileRepository } from '../persistence/compound-archive-reconcile-repository';
 import type { CompoundProposalRepository } from '../persistence/compound-proposal-repository';
 import { SUPPORTED_CHAIN_IDS, DaoSourceConfigSchema } from '../plugin/plugin';
 
 export interface CompoundReconcilePluginDeps {
   proposals: CompoundProposalRepository;
   proposalRepo: ProposalRepository;
+  archiveRepository: CompoundArchiveReconcileRepository;
+  archiveWriter: GovernorArchiveWriter;
   metrics: ReconcileDriverMetrics;
   logger: Logger;
 }
@@ -26,22 +31,39 @@ function createReconcilePlugin(
     deps.logger,
     [targetSourceType],
     deps.proposalRepo,
+    deps.metrics,
   );
   const config: ReconcileDriverConfig = {
     batchSize: Number(process.env['COMPOUND_STATE_RECONCILE_BATCH_SIZE'] ?? 50),
     rpcFailEscalateAfter: Number(process.env['COMPOUND_STATE_RECONCILE_RPC_FAIL_ESCALATE'] ?? 5),
   };
   const driver = new ReconcileDriver(reconciler, deps.proposals, deps.metrics, deps.logger, config);
+  const audit = new CompoundArchiveReconciler(
+    {
+      repository: deps.archiveRepository,
+      writer: deps.archiveWriter,
+      metrics: deps.metrics,
+      logger: deps.logger,
+    },
+    targetSourceType,
+  );
 
   return {
     sourceType,
     supportedChainIds: SUPPORTED_CHAIN_IDS,
     parseConfig: (raw) => DaoSourceConfigSchema.parse(raw),
-    buildIngestSpec: (_ctx, _cfg) => ({
+    buildIngestSpec: (ctx, rawCfg) => ({
       kind: 'evm-block-head-poller',
       listener: ({ chainCfg, headBlock, client }) => {
         const headLag = BigInt(chainCfg.headLag);
         if (headBlock < headLag) return;
+        void audit.onConfirmedHead({
+          reconcileSourceId: ctx.daoSourceId,
+          governorAddress: (rawCfg as { governor_address: string }).governor_address,
+          chainId: chainCfg.chainId,
+          confirmedHead: headBlock - headLag,
+          client,
+        });
         const blocksPerMinute = chainCfg.blocksPerMinute ?? 5;
         const recheckGapSeconds = Number(
           process.env['COMPOUND_STATE_RECONCILE_RECHECK_GAP_SECONDS'] ?? 7_200,
@@ -86,8 +108,8 @@ export function createCompoundGovernorOzReconcilePlugin(
  * ordering as Bravo, and computes defeat from stored vote counts against a constant `quorumVotes()`
  * — no external governance-strategy call, so it does not revert when read at the confirmed head.
  *
- * Steady-state cost is negligible: the driver only issues RPC when `findStaleForReconciliation`
- * returns rows, and for a dead governor that is empty once the backlog drains.
+ * State-check RPCs stop when the backlog drains. The archive audit still verifies
+ * the confirmed range, because its cursor is independent of proposal state.
  */
 export function createCompoundGovernorAlphaReconcilePlugin(
   deps: CompoundReconcilePluginDeps,
