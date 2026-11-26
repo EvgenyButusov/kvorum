@@ -42,6 +42,9 @@ spec:
             - name: config
               mountPath: /etc/prometheus
               readOnly: true
+            - name: rules
+              mountPath: /etc/prometheus/rules
+              readOnly: true
             - name: data
               mountPath: /prometheus
           readinessProbe:
@@ -69,6 +72,9 @@ spec:
         - name: config
           configMap:
             name: kvorum-prometheus-config
+        - name: rules
+          configMap:
+            name: kvorum-prometheus-rules
         - name: data
           persistentVolumeClaim:
             claimName: kvorum-prometheus-data

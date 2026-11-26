@@ -82,6 +82,28 @@ describeWithDb('DlqRepository (integration)', () => {
     ).rejects.toThrow(RollbackSignal);
   });
 
+  it('list() filters by stage, so a batch re-drive cannot pick up another stage', async () => {
+    await expect(
+      pgDb.transaction().execute(async (trx) => {
+        const repo = new DlqRepository(trx as never);
+        const wanted = await seedDlqRow(trx, {
+          stage: 'delegation_archive_stage',
+          archive_tx_hash: '0x' + '7'.repeat(64),
+        });
+        await seedDlqRow(trx, {
+          stage: 'archive_event_stage',
+          archive_tx_hash: '0x' + '8'.repeat(64),
+        });
+
+        const rows = await repo.list({ stage: 'delegation_archive_stage', limit: 10 });
+        expect(rows.every((r) => r.stage === 'delegation_archive_stage')).toBe(true);
+        expect(rows.some((r) => r.id === wanted)).toBe(true);
+
+        throw new RollbackSignal();
+      }),
+    ).rejects.toThrow(RollbackSignal);
+  });
+
   it('getById() returns the row or undefined', async () => {
     await expect(
       pgDb.transaction().execute(async (trx) => {
