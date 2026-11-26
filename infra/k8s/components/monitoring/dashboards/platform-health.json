@@ -416,6 +416,24 @@
           "legendFormat": "{{source_type}} / {{outcome}}"
         }
       ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Derivation outcomes per source. A sustained held count means rows are waiting on a parent that has not arrived; past COMPOUND_MISSING_PROPOSAL_HOLD_MAX_MS they escalate to failed and, for votes, into the projection DLQ. See docs/runbooks/state-reconciliation.md.",
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10 } }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 70 },
+      "id": 16,
+      "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "expr": "sum by (source_type, event_type, outcome, reason) (increase(indexer_derivation_processed_total{outcome=~\"held|failed\"}[1h])) > 0",
+          "legendFormat": "{{source_type}} {{event_type}} {{outcome}} {{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Held and failed derivations (1h)",
+      "type": "timeseries"
     }
   ]
 }

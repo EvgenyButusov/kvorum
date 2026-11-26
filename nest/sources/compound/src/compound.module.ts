@@ -35,6 +35,7 @@ import { ChainContextModule } from '@nest/chain';
 import { toChainLogger } from '@nest/chain';
 import { DbModule } from '@nest/db';
 import { createReconcileLogger } from './compound-reconcile-logger';
+import { recordDerivationOutcome } from '../../derivation-metrics';
 import { buildDriverMetrics } from '../../reconcile-metrics';
 
 export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
@@ -99,7 +100,7 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
           registry,
           metrics: {
             batchLookupSeconds: () => undefined,
-            processed: () => undefined,
+            processed: recordDerivationOutcome,
           },
           logger: toChainLogger(new Logger('GovernorProjectionApplier')),
         }),
@@ -126,7 +127,7 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
           metrics: {
             batchLookupSeconds: () => undefined,
             chWriteSeconds: () => undefined,
-            processed: () => undefined,
+            processed: recordDerivationOutcome,
           },
           logger: toChainLogger(new Logger('GovernorVoteProjectionApplier')),
         }),
@@ -151,7 +152,7 @@ export const COMPOUND_SOURCE_PLUGIN = 'COMPOUND_SOURCE_PLUGIN';
           metrics: {
             batchLookupSeconds: () => undefined,
             chWriteSeconds: () => undefined,
-            processed: () => undefined,
+            processed: recordDerivationOutcome,
           },
           logger: toChainLogger(new Logger('CompTokenDelegationProjectionApplier')),
         }),

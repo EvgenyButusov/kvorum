@@ -196,6 +196,11 @@ LIMIT 50;
 
 A row whose `received_at` is older than the bound and that is still listed here means the derivation
 worker is not reaching it — check the worker's lag and the projection DLQ before assuming the hold
-is at fault. Compound's projection appliers currently pass no-op outcome metrics, so `held` and
-`failed` counts are not on the Platform Health dashboard; the SQL above and the escalation logs are
-the authoritative view until those are wired (Aave's vote applier is the reference).
+is at fault.
+
+Compound's appliers report outcomes into `derivation_processed`, the same counter the derivation
+worker uses, labelled `source_type`, `event_type`, `outcome` and `reason`. "Held and failed
+derivations" on the Platform Health dashboard charts the `held` and `failed` series. A sustained
+`held` count is the signal to investigate; `failed` with `reason="no_proposal"` means rows have
+passed the bound. Lido's appliers still pass no-op metrics, so this panel covers Compound and Aave
+only.
