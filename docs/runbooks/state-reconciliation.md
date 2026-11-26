@@ -218,6 +218,26 @@ sum by (source_type) (indexer_derivation_parked_rows) or vector(0)
 Requeue a parked row with `derive replay <dao_source_id>`, which resets both the watermark and the
 attempt count for the source.
 
+## Held derivations
+
+The ceiling above counts attempts, and a held row does not burn one — `markHeld` defers without
+incrementing. So a row that only ever holds can never park, and `indexer_derivation_parked_rows`
+reads zero for it however long it has waited. Watch the hold's age instead:
+
+```promql
+max by (source_type) (indexer_derivation_held_oldest_seconds) or vector(0)
+```
+
+Aave's cross-chain payload stitch is the case this exists for. ADR-0065 makes that hold indefinite
+on purpose — the governance-side declaration can sit at a higher block than the payload — so the
+retry backs off with the row's age (hourly doublings, capped by
+`AAVE_STITCH_HOLD_MAX_BACKOFF_MS`, six hours by default) rather than ending. Nothing is orphaned and
+every row is still re-driven.
+
+A hold older than plausible bridge latency is therefore not a transient: it is either a genuinely
+orphaned payload or a correlation mismatch in `chain_id`, the payloads-controller address or
+`payloadId`. Compare those against `aave_proposal_payload` before concluding either way.
+
 ## Orphaned projection rows
 
 A vote or lifecycle event whose parent proposal has not derived yet is held, not failed: a catch-up

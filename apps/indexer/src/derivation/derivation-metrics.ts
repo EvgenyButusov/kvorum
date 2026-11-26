@@ -39,6 +39,10 @@ export const derivationMetrics = {
     name: 'derivation_timestamp_fill',
     description: 'Lazy voting timestamp fill outcomes',
   }),
+  heldOldestSeconds: defineGauge({
+    name: 'derivation_held_oldest_seconds',
+    description: 'Age of the oldest held, un-derived archive row, by source type',
+  }),
   parkedRows: defineGauge({
     name: 'derivation_parked_rows',
     description: 'Un-derived rows past the projection attempt ceiling, by source type',

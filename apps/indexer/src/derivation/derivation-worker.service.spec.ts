@@ -13,6 +13,7 @@ vi.mock('./derivation-metrics', () => ({
     timestampFill: { add: vi.fn() },
     timestampFillBacklog: { record: vi.fn() },
     parkedRows: { record: vi.fn() },
+    heldOldestSeconds: { record: vi.fn() },
   },
 }));
 
@@ -55,6 +56,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([OFFCHAIN_ROW]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       archive as never,
@@ -81,6 +83,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([OFFCHAIN_ROW]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       archive as never,
@@ -139,11 +142,35 @@ describe('DerivationWorkerService', () => {
     expect(applier.applyBatch).toHaveBeenCalledWith([ROW]);
   });
 
+  it('records the oldest held row age, which a batch-derived gauge reads as zero', async () => {
+    const actorResolution = {
+      findDerivableBy: vi.fn().mockResolvedValue([]),
+      findDerivableByOffchain: vi.fn().mockResolvedValue([]),
+      countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi
+        .fn()
+        .mockResolvedValue([{ source_type: 'aave_payloads_controller', age_seconds: 11_000_000 }]),
+    };
+    const worker = new DerivationWorkerService(
+      {} as never,
+      actorResolution as never,
+      makeRegistry() as never,
+      [],
+    );
+
+    await worker.tick();
+
+    expect(derivationMetrics.heldOldestSeconds.record).toHaveBeenCalledWith(11_000_000, {
+      source_type: 'aave_payloads_controller',
+    });
+  });
+
   it('runs an initial tick on bootstrap', async () => {
     const actorResolution = {
       findDerivableBy: vi.fn().mockResolvedValue([]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       {} as never,
@@ -171,6 +198,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([ROW]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       archive as never,
@@ -198,6 +226,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([ROW]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -248,6 +277,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([failedRow, healthyRow]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([OFFCHAIN_ROW]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       { incrementAttemptCount: vi.fn() } as never,
@@ -271,6 +301,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([ROW]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -300,6 +331,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([alphaRow]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -340,6 +372,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([rowA, rowB]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -367,6 +400,7 @@ describe('DerivationWorkerService', () => {
         .mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve([]), 50))),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       { incrementAttemptCount: vi.fn() } as never,
@@ -387,6 +421,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const worker = new DerivationWorkerService(
       {} as never,
@@ -418,6 +453,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([ROW, row2]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -444,6 +480,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([rowA, rowB]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -472,6 +509,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([rowA, rowB]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -500,6 +538,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([highRow]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const applier = {
       kind: 'projection' as const,
@@ -543,6 +582,7 @@ describe('DerivationWorkerService', () => {
       findDerivableBy: vi.fn().mockResolvedValue([earlierCancel, create348, cancel348]),
       findDerivableByOffchain: vi.fn().mockResolvedValue([]),
       countExhausted: vi.fn().mockResolvedValue([]),
+      oldestHeldAgeSeconds: vi.fn().mockResolvedValue([]),
     };
     const seen: string[] = [];
     const applier = {

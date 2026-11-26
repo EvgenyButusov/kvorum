@@ -332,11 +332,30 @@ describe('ArchiveActorResolutionRepository', () => {
       expect(select.groupBy).toHaveBeenCalledWith('source_type');
     });
 
+    it('reports the oldest held row per source type from the table, not from a batch', async () => {
+      const select = makeSelectChain([
+        {
+          source_type: 'aave_payloads_controller',
+          oldest_received_at: new Date('2026-07-15T00:00:00Z'),
+        },
+      ]);
+      const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
+
+      await expect(
+        repo.oldestHeldAgeSeconds(['PayloadCreated'], new Date('2026-07-15T01:00:00Z')),
+      ).resolves.toEqual([{ source_type: 'aave_payloads_controller', age_seconds: 3600 }]);
+
+      expect(select.where).toHaveBeenCalledWith('derivation_hold_until', 'is not', null);
+      expect(select.where).toHaveBeenCalledWith('derived_at', 'is', null);
+      expect(select.groupBy).toHaveBeenCalledWith('source_type');
+    });
+
     it('does not query when no event types are requested', async () => {
       const select = makeSelectChain([]);
       const repo = new ArchiveActorResolutionRepository({ selectFrom: select.selectFrom } as never);
 
       await expect(repo.countExhausted([], 50)).resolves.toEqual([]);
+      await expect(repo.oldestHeldAgeSeconds([])).resolves.toEqual([]);
       expect(select.selectFrom).not.toHaveBeenCalled();
     });
   });

@@ -210,6 +210,24 @@ describe('AavePayloadStitchApplier', () => {
     });
   });
 
+  // #686: a permanently unmatched row rewrote its hold every 60s for four months. ADR-0065 keeps
+  // the hold indefinite, so the retry backs off instead of ending.
+  it('widens the back-off for a row that has waited far longer than bridge latency', async () => {
+    const row = { ...BASE_ROW, received_at: new Date(Date.now() - 120 * 24 * 60 * 60_000) };
+    const { applier, archive, dlq } = buildApplier({ declared: undefined });
+
+    const before = Date.now();
+    await applier.applyBatch([row]);
+
+    const [, holdUntil] = (archive.markHeld as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      Date,
+    ];
+    expect(holdUntil.getTime() - before).toBeGreaterThan(60 * 60_000);
+    expect(dlq.insert).not.toHaveBeenCalled();
+    expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
+  });
+
   it('defers rows with a back-off when the declared payload row is absent', async () => {
     const row = { ...BASE_ROW, received_at: new Date(Date.now() - 60_000) };
     const { applier, archive, dlq, metrics, logger } = buildApplier({

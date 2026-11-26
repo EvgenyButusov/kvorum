@@ -215,6 +215,33 @@ export class ArchiveActorResolutionRepository {
     return rows.map((row) => ({ source_type: row.source_type, count: Number(row.count) }));
   }
 
+  /**
+   * Age of the oldest row currently held, per source type, for the held-backlog gauge.
+   *
+   * Appliers can only report the rows in the batch they were handed, and a held row is excluded
+   * from selection until its hold expires — so a batch-derived age reads zero between retries and
+   * spikes when one lands (#686). This reads the table instead, so the gauge is stable.
+   */
+  async oldestHeldAgeSeconds(
+    eventTypes: readonly ArchiveEventType[],
+    now: Date = new Date(),
+  ): Promise<{ source_type: string; age_seconds: number }[]> {
+    if (eventTypes.length === 0) return [];
+
+    const rows = await this.pgDb
+      .selectFrom('archive_event')
+      .select(['source_type', (eb) => eb.fn.min<Date>('received_at').as('oldest_received_at')])
+      .where('derived_at', 'is', null)
+      .where('derivation_hold_until', 'is not', null)
+      .where('event_type', 'in', eventTypes)
+      .groupBy('source_type')
+      .execute();
+    return rows.map((row) => ({
+      source_type: row.source_type,
+      age_seconds: Math.max(0, (now.getTime() - row.oldest_received_at.getTime()) / 1000),
+    }));
+  }
+
   /** Off-chain counterpart of findUnresolvedActors. */
   async findUnresolvedActorsOffchain(
     eventTypes: readonly ArchiveEventType[],
