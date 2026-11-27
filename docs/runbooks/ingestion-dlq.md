@@ -80,8 +80,10 @@ un-derived rows are the projection's problem, not the archive's, and
 
 `max_server_memory_usage` is 768 MiB against the pod's 1280 MiB limit
 (`infra/k8s/components/data/kvorum-limits.xml`), because the node also carries
-Postgres, four Node services and Prometheus. Before changing it, establish what
-actually consumed the memory — `system.errors` for code 241, the pod's
+Postgres, four Node services and Prometheus. Compare `would use` against `current RSS` in
+the error first: a stable gap means tracker drift, which a restart clears — see
+[clickhouse-memory-tracker-drift.md](clickhouse-memory-tracker-drift.md). Otherwise
+establish what actually consumed the memory — `system.errors` for code 241, the pod's
 `restartCount`, and what else ran at that moment. The September 2026 window was
 ClickHouse's own system-log merges, fixed by removing those tables, not by raising
 the cap.
