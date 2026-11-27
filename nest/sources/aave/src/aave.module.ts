@@ -57,6 +57,7 @@ import { toChainLogger } from '@nest/chain';
 import { DbModule } from '@nest/db';
 import { AaveDelegationPowerSweepService } from './aave-delegation-power-sweep.service';
 import { aaveMetrics } from './aave-metrics';
+import { recordDerivationOutcome } from '../../derivation-metrics';
 import { buildDriverMetrics } from '../../reconcile-metrics';
 
 export const AAVE_SOURCE_PLUGIN = 'AAVE_SOURCE_PLUGIN';
@@ -173,8 +174,10 @@ export const AAVE_SOURCE_PLUGIN = 'AAVE_SOURCE_PLUGIN';
           registry,
           metrics: {
             batchLookupSeconds: () => undefined,
-            processed: () => undefined,
+            processed: recordDerivationOutcome,
             ipfsTitleFetch: (outcome) => aaveMetrics.ipfsTitleFetch.add(1, { outcome }),
+            unparked: (rows, { source_type }) =>
+              aaveMetrics.derivationUnparked.add(rows, { source_type, trigger: 'proposal_insert' }),
           },
           logger: toChainLogger(new Logger('AaveGovernanceProjectionApplier')),
         }),
@@ -321,8 +324,10 @@ export const AAVE_SOURCE_PLUGIN = 'AAVE_SOURCE_PLUGIN';
           ipfsFetcher,
           metrics: {
             batchLookupSeconds: () => undefined,
-            processed: () => undefined,
+            processed: recordDerivationOutcome,
             ipfsTitleFetch: (outcome) => aaveMetrics.ipfsTitleFetch.add(1, { outcome }),
+            unparked: (rows, { source_type }) =>
+              aaveMetrics.derivationUnparked.add(rows, { source_type, trigger: 'proposal_insert' }),
           },
           logger: toChainLogger(new Logger('AaveGovernorV2ProjectionApplier')),
         }),

@@ -28,6 +28,18 @@ function notHeld(now: Date) {
  */
 export const DEFAULT_MAX_DERIVATION_ATTEMPTS = 50;
 
+/**
+ * The effective ceiling. Lives here rather than in the worker because the applier and
+ * `derive unpark` compare against it too, and a second copy reading the same variable would drift
+ * silently. A non-numeric or non-positive override would park every row, so it falls back.
+ */
+export function resolveMaxDerivationAttempts(env: NodeJS.ProcessEnv = process.env): number {
+  const configured = Number(env['DERIVATION_MAX_ATTEMPTS']);
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_DERIVATION_ATTEMPTS;
+}
+
 function notExhausted(maxAttempts: number) {
   return (eb: ExpressionBuilder<PgDatabase, 'archive_event'>) =>
     eb('derivation_attempt_count', '<', maxAttempts);

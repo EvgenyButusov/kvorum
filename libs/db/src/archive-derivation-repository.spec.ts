@@ -155,4 +155,43 @@ describe('ArchiveDerivationRepository', () => {
     expect(update.set).toHaveBeenCalledWith({ derivation_hold_until: holdUntil });
     expect(update.where).toHaveBeenCalledWith('id', '=', 'row-1');
   });
+
+  it("unparks a source's past-ceiling rows without clearing derived_at", async () => {
+    const unparkedRow = {
+      source_type: 'aave_governance_v3',
+      chain_id: '0x1',
+      tx_hash: '0xtx',
+      log_index: 1,
+      event_type: 'ProposalExecuted',
+    };
+    const execute = vi.fn().mockResolvedValue([unparkedRow]);
+    const chainObj: Record<string, unknown> = { execute };
+    const where = vi.fn().mockReturnValue(chainObj);
+    const set = vi.fn().mockReturnValue(chainObj);
+    const returning = vi.fn().mockReturnValue(chainObj);
+    chainObj['where'] = where;
+    chainObj['set'] = set;
+    chainObj['returning'] = returning;
+    const updateTable = vi.fn().mockReturnValue(chainObj);
+    const repo = new ArchiveDerivationRepository({ updateTable } as never);
+
+    await expect(repo.unparkForDaoSource('source-1', 50)).resolves.toEqual([unparkedRow]);
+
+    // The identity tuple comes back so the caller can log per record (ADR-0091).
+    expect(returning).toHaveBeenCalledWith([
+      'source_type',
+      'chain_id',
+      'tx_hash',
+      'log_index',
+      'event_type',
+    ]);
+
+    expect(updateTable).toHaveBeenCalledWith('archive_event');
+    // Resetting the counter is the whole operation: clearing derived_at would re-derive rows that
+    // already applied, which is what makes `derive replay` the wrong tool for a parked row.
+    expect(set).toHaveBeenCalledWith({ derivation_attempt_count: 0 });
+    expect(where).toHaveBeenCalledWith('dao_source_id', '=', 'source-1');
+    expect(where).toHaveBeenCalledWith('derived_at', 'is', null);
+    expect(where).toHaveBeenCalledWith('derivation_attempt_count', '>=', 50);
+  });
 });

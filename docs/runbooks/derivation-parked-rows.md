@@ -4,8 +4,10 @@ An archive row stops being derivable once `derivation_attempt_count` reaches the
 projection ceiling (`DEFAULT_MAX_DERIVATION_ATTEMPTS`, 50; override with
 `DERIVATION_MAX_ATTEMPTS`). The ceiling exists so a row whose failure never clears
 stops being reselected every tick. The cost is that a row whose failure _does_
-later clear never returns on its own: nothing re-attempts it, and the proposal it
-would have advanced keeps its stale state indefinitely.
+later clear does not generally return on its own, and the proposal it would have
+advanced keeps a stale state the reconciler is not allowed to correct. The one
+automatic path back is an Aave proposal insert, which unparks its own
+`dao_source` — see below.
 
 This runbook covers returning those rows to the queue.
 
@@ -47,12 +49,22 @@ whose cause is still live only spends the ceiling again. The usual causes:
 | archive payload absent | `select count(*) from kvorum.archive_event_<source> final where block_number = … and log_index = …` | ClickHouse returns the row |
 | undecodable payload    | the `reason` on the last `*_derivation_failed` log line                                             | never — leave parked       |
 
-A missing parent holds with bounded backoff rather than counting attempts, which
-absorbs a lifecycle event that merely arrives ahead of its creation. It does not
-help when the parent is absent for longer than
-`AAVE_MISSING_PROPOSAL_HOLD_MAX_MS` (2h) — past the bound the row escalates and
-still parks, so an ingestion gap that is repaired days later always needs one
-manual unpark.
+For an absent parent the Aave sources handle both halves themselves, so check
+before reaching for the command:
+
+- Within `AAVE_MISSING_PROPOSAL_HOLD_MAX_MS` (2h of the row's `received_at`) the
+  event is held rather than failed, so it never spends attempts on mere ordering.
+- Past that bound it escalates and walks to the ceiling as before — but when the
+  parent's `ProposalCreated` is finally derived, that insert unparks every
+  past-ceiling un-derived row of its `dao_source`. Each restored row is counted on
+  `aave_derivation_unparked` and logged with its archive tuple as
+  `aave_derivation_unparked_on_create` (`aave_v2_…` for governor-v2).
+
+So a manual unpark is for rows whose parent arrived before this behaviour
+existed, for sources without it, or when the cause was never the parent at all.
+Since the park reason is not stored, that automatic reset also catches rows
+parked for an unrelated cause; those simply fail and re-park, which is why the
+table above still matters.
 
 ## Unpark
 

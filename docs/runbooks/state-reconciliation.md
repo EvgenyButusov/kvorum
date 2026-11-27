@@ -248,8 +248,10 @@ can archive it before its creation. `ProposalCreated` precedes both in block ord
 a parent still missing after the source's hold bound (`COMPOUND_MISSING_PROPOSAL_HOLD_MAX_MS` or
 `AAVE_MISSING_PROPOSAL_HOLD_MAX_MS`, default two hours, measured from `archive_event.received_at`) is
 an ingestion gap rather than ordering — which is long enough for the archive audit above to restore
-it on one of its ticks. Past the bound the row escalates and walks to the attempt ceiling, so an
-ingestion gap repaired days later leaves a parked row needing `derive unpark`.
+it on one of its ticks. Past the bound the row escalates and walks to the attempt ceiling. For Aave
+the parent's own insert then unparks that `dao_source`, so the row recovers once the create event
+derives; for Compound an ingestion gap repaired days later leaves a parked row needing
+`derive unpark`.
 
 Past the bound the row stops being held. A vote goes through the normal vote-projection failure
 path and is quarantined in `ingestion_dlq` once `VOTE_PROJECTION_DLQ_THRESHOLD` attempts are spent;

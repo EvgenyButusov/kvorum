@@ -107,10 +107,10 @@ export function registerDerive(program: Command): void {
     .action(async function action(opts: DeriveUnparkOptions) {
       await withDeriveFormat(this, opts, async (format) => {
         const { archiveDerivationRepository } = buildContainer();
-        const { DEFAULT_MAX_DERIVATION_ATTEMPTS } = await import('@libs/db');
+        const { resolveMaxDerivationAttempts } = await import('@libs/db');
         const maxAttempts =
           opts.maxAttempts === undefined
-            ? DEFAULT_MAX_DERIVATION_ATTEMPTS
+            ? resolveMaxDerivationAttempts()
             : parseMaxAttempts(opts.maxAttempts);
         const dryRun = opts.dryRun === true;
 

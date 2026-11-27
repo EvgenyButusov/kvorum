@@ -2,6 +2,15 @@ import { sql, type Kysely } from 'kysely';
 import type { ArchiveEventType } from '@libs/domain';
 import type { PgDatabase } from './schema/pg';
 
+/** Identity of a row returned to the queue, for the per-record repair log ADR-0091 requires. */
+export interface UnparkedArchiveRow {
+  source_type: string;
+  chain_id: string;
+  tx_hash: string;
+  log_index: number;
+  event_type: string;
+}
+
 export interface ArchiveDerivationRow {
   id: string;
   source_type: string;
@@ -150,6 +159,25 @@ export class ArchiveDerivationRepository {
       .set({ derivation_hold_until: holdUntil })
       .where('id', '=', id)
       .execute();
+  }
+
+  /**
+   * Returns a source's parked rows to the queue when one of its proposals is first inserted: a
+   * lifecycle event that spent its attempts while its parent was missing is otherwise excluded for
+   * good. The park reason is not stored, so a row parked for another cause is reset and re-parks.
+   */
+  async unparkForDaoSource(
+    daoSourceId: string,
+    maxAttempts: number,
+  ): Promise<UnparkedArchiveRow[]> {
+    return this.pgDb
+      .updateTable('archive_event')
+      .set({ derivation_attempt_count: 0 })
+      .where('dao_source_id', '=', daoSourceId)
+      .where('derived_at', 'is', null)
+      .where('derivation_attempt_count', '>=', maxAttempts)
+      .returning(['source_type', 'chain_id', 'tx_hash', 'log_index', 'event_type'])
+      .execute() as Promise<UnparkedArchiveRow[]>;
   }
 
   async incrementAttemptCount(id: string): Promise<void> {

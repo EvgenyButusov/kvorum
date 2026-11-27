@@ -17,6 +17,11 @@ export const aaveMetrics = {
     name: 'aave_delegation_derivation',
     description: 'Aave token delegation derivation outcomes during aave_token projection',
   }),
+  derivationUnparked: defineCounter({
+    name: 'aave_derivation_unparked',
+    description:
+      'Archive rows returned to the derivable queue by a proposal insert, per restored row',
+  }),
   stitchPendingSeconds: defineGauge({
     name: 'stitch_pending_seconds',
     description:
