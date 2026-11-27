@@ -1,0 +1,63 @@
+# Monthly ClickHouse restart to clear memory-tracker drift.
+#
+# ClickHouse 24.10 has no `memory_worker_correct_memory_tracker`, so the global memory
+# tracker only accumulates: failed allocations stay counted, and nothing reconciles the
+# total against real usage. Over 47 days of uptime the tracked total reached 1.2 TiB and
+# the limit check sat ~300 MiB above a resident set of ~460 MiB, so the server began
+# refusing API reads — including zero-byte allocations — against the 768 MiB cap while
+# roughly 280 MiB of real headroom went unused. A restart resets the tracker; raising the
+# cap would not, because the drift is unbounded.
+#
+# Monthly, because the drift took about six weeks to exhaust the slack between the real
+# working set and the cap. Remove this once ClickHouse is upgraded to a version whose
+# memory worker corrects the tracker from a measurement.
+#
+# Reads fail for the few seconds the pod is down, and an archive write landing in that
+# window dead-letters, so this runs away from the hourly poll and the nightly backup.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kvorum-clickhouse-restart
+  labels:
+    app.kubernetes.io/name: kvorum-clickhouse-restart
+    app.kubernetes.io/part-of: kvorum
+spec:
+  schedule: '40 4 1 * *'
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: kvorum-clickhouse-restart
+            app.kubernetes.io/part-of: kvorum
+        spec:
+          restartPolicy: Never
+          serviceAccountName: kvorum-clickhouse-restart
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+          containers:
+            - name: restart
+              image: registry.k8s.io/kubectl:v1.36.7
+              command: ['sh', '/scripts/restart-clickhouse.sh']
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: kvorum-clickhouse-restart-scripts

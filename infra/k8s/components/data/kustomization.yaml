@@ -8,10 +8,19 @@ resources:
   - postgres-service.yaml
   - clickhouse-statefulset.yaml
   - clickhouse-service.yaml
+  - clickhouse-restart-rbac.yaml
+  - clickhouse-restart-cronjob.yaml
 
 # Hash the ClickHouse config into its ConfigMap name. The StatefulSet mounts the file
 # with subPath, so changing an unhashed ConfigMap would not update a running pod.
 configMapGenerator:
+  - name: kvorum-clickhouse-restart-scripts
+    files:
+      - scripts/restart-clickhouse.sh
+    options:
+      labels:
+        app.kubernetes.io/name: kvorum-clickhouse-restart
+        app.kubernetes.io/part-of: kvorum
   - name: kvorum-clickhouse-config
     files:
       - kvorum-limits.xml
