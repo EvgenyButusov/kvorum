@@ -13,6 +13,7 @@ kind: Component
 resources:
   - prometheus-rbac.yaml
   - prometheus-config.yaml
+  - prometheus-rules.yaml
   - prometheus-pvc.yaml
   - prometheus-deployment.yaml
   - prometheus-service.yaml

@@ -1,0 +1,68 @@
+# Alert rules for silent ingestion loss. A ClickHouse write that fails past its retries
+# is dead-lettered and the poll cursor moves on, so the only live record is ingestion_dlq;
+# 1230 rows accumulated unread between September and November 2026 because nothing
+# watched it. These rules watch the growth, not the level, which is why a backlog awaiting
+# re-drive does not keep them firing.
+#
+# No Alertmanager is deployed: these surface in the Prometheus UI and through the ALERTS
+# series in Grafana. Routing them somewhere a human is paged is a separate decision.
+#
+# Editing this ConfigMap needs a `rollout restart deploy/kvorum-prometheus`.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kvorum-prometheus-rules
+  labels:
+    app.kubernetes.io/name: kvorum-prometheus
+    app.kubernetes.io/part-of: kvorum
+data:
+  ingestion.yml: |
+    groups:
+      - name: kvorum-ingestion-loss
+        interval: 1m
+        rules:
+          # ingestion_dlq_size is recalculated from the table every ~10s, so each indexer
+          # process reports the same table-wide count: max, never sum, across instances.
+          - alert: KvorumIngestionDlqGrowing
+            expr: max by (stage, source) (delta(indexer_ingestion_dlq_size[2h])) > 0
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: 'DLQ depth rising for {{ $labels.stage }}/{{ $labels.source }}'
+              description: >-
+                Dead-lettered rows are accumulating. Events in archive stages are absent
+                from the archive until re-driven: see docs/runbooks/ingestion-dlq.md.
+
+          - alert: KvorumArchiveWriteDlqRouted
+            expr: sum by (source) (rate(indexer_ingestion_archive_writes_total{result="dlq_routed"}[30m])) > 0
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: 'Archive writes are being dead-lettered for {{ $labels.source }}'
+              description: >-
+                An archive write has exhausted its retries, so the event is lost from
+                ClickHouse until re-driven while the poll cursor advances past it.
+
+          - alert: KvorumArchiveLogTransientDlq
+            expr: sum by (source) (rate(indexer_ingestion_archive_log_consumer_total{result="transient_dlq"}[30m])) > 0
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: 'Raw logs are being dead-lettered for chain {{ $labels.source }}'
+              description: >-
+                The archive_log consumer is failing past its retry limit, which in the
+                September 2026 incident meant ClickHouse was refusing or OOM-killing inserts.
+
+          - alert: KvorumDerivationParkedRising
+            expr: max by (source_type) (delta(indexer_derivation_parked_rows[6h])) > 0
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: 'Derivation is parking rows for {{ $labels.source_type }}'
+              description: >-
+                Rows have passed the projection attempt ceiling and will not be retried
+                automatically.

@@ -56,10 +56,13 @@ export class DlqRepository {
     return rows.map((r) => ({ stage: r.stage, source: r.source, count: Number(r.count) }));
   }
 
-  async list(params: { source?: string; limit: number }): Promise<IngestionDlq[]> {
+  async list(params: { source?: string; stage?: string; limit: number }): Promise<IngestionDlq[]> {
     let query = this.pgDb.selectFrom('ingestion_dlq').selectAll().orderBy('first_seen_at', 'asc');
     if (params.source != null) {
       query = query.where('source', '=', params.source);
+    }
+    if (params.stage != null) {
+      query = query.where('stage', '=', params.stage);
     }
     return query.limit(params.limit).execute();
   }

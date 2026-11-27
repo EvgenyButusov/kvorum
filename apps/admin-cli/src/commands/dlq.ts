@@ -4,12 +4,19 @@ import { withAudit } from '../audit.js';
 import { buildContainer } from '../bootstrap.js';
 import { emit, ExitCode, fail, type OutputFormat, resolveFormat } from '../output.js';
 import { DLQ_RETRY_ADAPTERS } from './dlq-retry/registry.js';
+import { DlqBatchStopped, retryDlqBatch } from './dlq-retry-batch.js';
 import { isDlqRetryableStage } from './dlq-retry-stage.js';
 
 type DlqCommon = { format?: string };
-type DlqListOptions = DlqCommon & { feature?: string; limit?: string };
+type DlqListOptions = DlqCommon & { feature?: string; stage?: string; limit?: string };
 type DlqRetryOptions = DlqCommon & { dryRun?: boolean };
 type DlqAcceptOptions = DlqCommon & { reason: string };
+type DlqRetryBatchOptions = DlqCommon & {
+  stage?: string;
+  source?: string;
+  limit?: string;
+  dryRun?: boolean;
+};
 
 export function registerDlq(program: Command): void {
   const dlq = program.command('dlq').description('Dead-letter queue management');
@@ -18,13 +25,14 @@ export function registerDlq(program: Command): void {
     .command('list')
     .description('List DLQ entries')
     .option('--feature <name>', 'filter by feature name')
+    .option('--stage <stage>', 'filter by stage')
     .option('--limit <N>', 'maximum number of entries to return')
     .option('--format <format>', 'output format: human or json')
     .action(async function action(opts: DlqListOptions) {
       await withDlqFormat(this, opts, async (format) => {
         const { dlqRepository } = buildContainer();
         const limit = parseLimit(opts.limit);
-        const rows = await dlqRepository.list({ source: opts.feature, limit });
+        const rows = await dlqRepository.list({ source: opts.feature, stage: opts.stage, limit });
         emit(
           format,
           () =>
@@ -88,6 +96,93 @@ export function registerDlq(program: Command): void {
             dlq_id: dlqId,
             status: resolved,
           });
+        });
+      });
+    });
+
+  dlq
+    .command('retry-batch')
+    .description('Retry every DLQ entry matching a stage and source')
+    .requiredOption('--stage <stage>', 'stage to retry')
+    .option('--source <source>', 'restrict to one source')
+    .option('--limit <N>', 'maximum number of entries to retry')
+    .option('--dry-run', 'show what would happen without making changes')
+    .option('--format <format>', 'output format: human or json')
+    .action(async function action(opts: DlqRetryBatchOptions) {
+      await withDlqFormat(this, opts, async (format) => {
+        const { dlqRepository } = buildContainer();
+        const stage = opts.stage ?? '';
+        if (!isDlqRetryableStage(stage)) {
+          fail(format, ExitCode.ValidationFailure, `stage is not retryable via cli: ${stage}`);
+        }
+        const adapter = DLQ_RETRY_ADAPTERS.get(stage);
+        if (adapter == null) {
+          fail(format, ExitCode.RuntimeFailure, `no retry adapter registered for stage ${stage}`);
+        }
+
+        const rows = await dlqRepository.list({
+          stage,
+          source: opts.source,
+          limit: parseLimit(opts.limit),
+        });
+
+        if (opts.dryRun === true) {
+          emit(format, () => `Would retry ${rows.length} DLQ rows in stage ${stage}`, {
+            stage,
+            dry_run: true,
+            count: rows.length,
+            dlq_ids: rows.map((r) => r.id),
+          });
+          return;
+        }
+
+        // withAudit records the outcome, so a run that stops early must reach it as a
+        // throw or the audit row would claim success for a partial re-drive.
+        const result = await withAudit(
+          'dlq retry-batch',
+          { stage, source: opts.source ?? null, candidates: rows.length },
+          async () => {
+            const outcome = await retryDlqBatch(rows, {
+              retry: (row) => adapter.retry(row),
+              markSucceeded: async (id, reason) => {
+                await pgDb
+                  .transaction()
+                  .execute((trx) =>
+                    new DlqRepository(trx).markRetrySucceeded(id, reason, executorFromEnv()),
+                  );
+              },
+            });
+            if (outcome.stoppedAt != null) {
+              throw new DlqBatchStopped(outcome);
+            }
+            return outcome;
+          },
+        ).catch((error: unknown) => {
+          if (error instanceof DlqBatchStopped) {
+            return error.result;
+          }
+          throw error;
+        });
+
+        if (result.stoppedAt != null) {
+          fail(
+            format,
+            ExitCode.RuntimeFailure,
+            `dlq retry-batch stopped at ${result.stoppedAt.id}`,
+            {
+              stage,
+              retried: result.retried.length,
+              remaining: rows.length - result.retried.length,
+              dlq_id: result.stoppedAt.id,
+              message: result.stoppedAt.message,
+            },
+          );
+        }
+
+        emit(format, () => `DLQ retry-batch completed: ${result.retried.length} rows`, {
+          stage,
+          retried: result.retried.length,
+          dlq_ids: result.retried,
         });
       });
     });
