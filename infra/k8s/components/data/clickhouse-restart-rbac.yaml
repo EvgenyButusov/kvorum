@@ -1,5 +1,6 @@
-# The restart CronJob's identity. Scoped to deleting the one ClickHouse pod: `list` and
-# `watch` cannot be restricted by resourceNames, and `kubectl wait` works from `get`.
+# The restart CronJob's identity, scoped to the one ClickHouse pod. `list` and `watch`
+# cannot be narrowed by resourceNames, so the script polls with `get` instead of
+# `kubectl wait`, which needs them.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
