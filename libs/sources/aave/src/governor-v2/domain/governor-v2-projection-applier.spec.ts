@@ -483,8 +483,37 @@ describe('AaveGovernorV2ProjectionApplier', () => {
     );
   });
 
-  it('increments attempt count and fails with no_proposal when proposal not found', async () => {
-    const archive = { incrementAttemptCount: vi.fn().mockResolvedValue(undefined) };
+  it('holds a lifecycle event whose parent is not derived yet, sparing the attempt count', async () => {
+    const archive = {
+      incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
+      markHeld: vi.fn().mockResolvedValue(undefined),
+    };
+    const metrics = makeMetrics();
+
+    const applier = new AaveGovernorV2ProjectionApplier({
+      pgDb: makeProjectionTx({ existingProposal: undefined }).pgDb as never,
+      archive: archive as never,
+      dlq: { markRetrySucceeded: vi.fn() } as never,
+      payloads: { fetchPayloads: vi.fn().mockResolvedValue([QUEUED_PAYLOAD]) } as never,
+      ipfsFetcher: { fetchTitleDescription: vi.fn() } as never,
+      metrics,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    });
+
+    await applier.applyBatch([{ ...ROW, event_type: 'ProposalQueued', received_at: new Date() }]);
+
+    expect(archive.markHeld).toHaveBeenCalledWith('archive-1', expect.any(Date));
+    expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'held', reason: 'no_proposal' }),
+    );
+  });
+
+  it('escalates to no_proposal once the parent is still absent past the hold bound', async () => {
+    const archive = {
+      incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
+      markHeld: vi.fn().mockResolvedValue(undefined),
+    };
     const metrics = makeMetrics();
     const logger = { warn: vi.fn(), error: vi.fn() };
 

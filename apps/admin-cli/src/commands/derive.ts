@@ -34,6 +34,13 @@ type DeriveRetitleOptions = DeriveCommon & {
   production?: boolean;
   dryRun?: boolean;
 };
+type DeriveUnparkOptions = DeriveCommon & {
+  source?: string[];
+  maxAttempts?: string;
+  confirm?: boolean;
+  production?: boolean;
+  dryRun?: boolean;
+};
 
 export function registerDerive(program: Command): void {
   const derive = program.command('derive').description('Derived data management');
@@ -84,6 +91,71 @@ export function registerDerive(program: Command): void {
               note: 'Resets watermarks only; running indexer performs re-derivation',
             },
           );
+        });
+      });
+    });
+
+  derive
+    .command('unpark')
+    .description('Return rows parked by the derivation attempt ceiling to the derivable queue')
+    .option('--source <type...>', 'archive source type(s) to scope to (repeatable)')
+    .option('--max-attempts <N>', 'attempt ceiling to compare against')
+    .option('--confirm', 'confirm the operation')
+    .option('--production', 'acknowledge production environment')
+    .option('--dry-run', 'report what would be unparked without making changes')
+    .option('--format <format>', 'output format: human or json')
+    .action(async function action(opts: DeriveUnparkOptions) {
+      await withDeriveFormat(this, opts, async (format) => {
+        const { archiveDerivationRepository } = buildContainer();
+        const { DEFAULT_MAX_DERIVATION_ATTEMPTS } = await import('@libs/db');
+        const maxAttempts =
+          opts.maxAttempts === undefined
+            ? DEFAULT_MAX_DERIVATION_ATTEMPTS
+            : parseMaxAttempts(opts.maxAttempts);
+        const dryRun = opts.dryRun === true;
+
+        if (!dryRun && (opts.confirm !== true || opts.production !== true)) {
+          fail(
+            format,
+            ExitCode.ValidationFailure,
+            'derive unpark requires both --confirm and --production, or --dry-run',
+          );
+        }
+
+        const parked = await archiveDerivationRepository.countParkedBySourceType(
+          maxAttempts,
+          opts.source,
+        );
+        const total = parked.reduce((sum, row) => sum + row.count, 0);
+
+        const describe = (verb: string, count: number): string =>
+          [
+            `${verb} ${count} parked row(s) at or past ${maxAttempts} attempts`,
+            ...parked.map((row) => `  ${row.source_type}: ${row.count}`),
+            'Rows also quarantined in a projection DLQ stay quarantined; clear those with dlq retry.',
+          ].join('\n');
+
+        if (dryRun) {
+          emit(format, () => describe('Would unpark', total), {
+            dry_run: true,
+            max_attempts: maxAttempts,
+            parked_total: total,
+            by_source_type: parked,
+          });
+          return;
+        }
+
+        await withAudit('derive unpark', { ...opts, maxAttempts }, async () => {
+          const unparked = await archiveDerivationRepository.unparkExhausted(
+            maxAttempts,
+            opts.source,
+          );
+          emit(format, () => describe('Unparked', unparked), {
+            max_attempts: maxAttempts,
+            unparked_rows: unparked,
+            by_source_type: parked,
+            note: 'Resets attempt counts only; the running indexer performs derivation',
+          });
         });
       });
     });
@@ -363,6 +435,17 @@ function parseOptionalBlock(value: string | undefined, optionName: string): bigi
   return BigInt(value);
 }
 
+function parseMaxAttempts(value: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new Error('--max-attempts must be an unsigned integer');
+  }
+  const parsed = Number(value);
+  if (parsed < 1) {
+    throw new Error('--max-attempts must be at least 1');
+  }
+  return parsed;
+}
+
 async function withDeriveFormat(
   command: Command,
   opts: DeriveCommon,
@@ -380,7 +463,8 @@ async function withDeriveFormat(
     const message = error instanceof Error ? error.message : 'unknown error';
     if (
       message.startsWith('invalid --format value:') ||
-      message.includes('must be an unsigned integer')
+      message.includes('must be an unsigned integer') ||
+      message.includes('must be at least 1')
     ) {
       fail(opts.format === 'json' ? 'json' : 'human', ExitCode.ValidationFailure, message);
     }

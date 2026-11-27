@@ -109,6 +109,7 @@ function makeProjectionTx(
     insertedDlq: undefined as unknown,
     markedDerivedId: undefined as string | undefined,
     markedActorResolvedId: undefined as string | undefined,
+    proposalSet: undefined as Record<string, unknown> | undefined,
     transactionCount: 0,
   };
   const proposalInserted = options.proposalInserted ?? true;
@@ -177,6 +178,7 @@ function makeProjectionTx(
       let lastArchiveSet: 'derived' | 'actor_resolved' | undefined;
       const updateChain = chain({
         set: vi.fn((values: Record<string, unknown>) => {
+          if (table === 'proposal' && 'state' in values) calls.proposalSet = values;
           if (table === 'archive_event') {
             if ('derivation_actor_resolved_at' in values) lastArchiveSet = 'actor_resolved';
             if ('derived_at' in values) lastArchiveSet = 'derived';
@@ -572,6 +574,53 @@ describe('AaveGovernanceProjectionApplier', () => {
     );
   });
 
+  it('dates a recovered lifecycle event from its original ingestion, not the replay', async () => {
+    const originallyIngestedAt = new Date('2026-10-11T11:47:20Z');
+    const { pgDb, calls } = makeProjectionTx({
+      existingProposal: { id: 'proposal-1', source_id: '526' },
+    });
+    const archive = {
+      incrementAttemptCount: vi.fn(),
+      markHeld: vi.fn(),
+    };
+    const metrics = makeMetrics();
+
+    const applier = new AaveGovernanceProjectionApplier({
+      pgDb: pgDb as never,
+      registry: makeRegistry(),
+      archive: archive as never,
+      dlq: { markRetrySucceeded: vi.fn() } as never,
+      payloads: {
+        fetchPayloads: vi.fn().mockResolvedValue([
+          {
+            ...CREATED_PAYLOAD,
+            event_type: 'ProposalExecuted',
+            payload: JSON.stringify({ proposalId: '526' }),
+          },
+        ]),
+      } as never,
+      ipfsFetcher: { fetchTitleDescription: vi.fn() } as never,
+      metrics,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    });
+
+    await applier.applyBatch([
+      { ...ROW, event_type: 'ProposalExecuted', received_at: originallyIngestedAt },
+    ]);
+
+    // An unparked row derives long after the fact, so the transition must carry the instant the
+    // event was archived; now() would backdate the proposal's history to the recovery run.
+    expect(calls.proposalSet).toMatchObject({
+      state: 'executed',
+      state_updated_at: originallyIngestedAt,
+    });
+    expect(calls.markedDerivedId).toBe('archive-1');
+    expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'derived', reason: null }),
+    );
+  });
+
   it('records skipped_state_guard when a state transition advances zero rows', async () => {
     const { pgDb } = makeProjectionTx({
       existingProposal: { id: 'proposal-1', source_id: '42' },
@@ -707,8 +756,12 @@ describe('AaveGovernanceProjectionApplier', () => {
     expect(hasActivePayloadsControllerSource).toHaveBeenCalledTimes(1);
   });
 
-  it('increments attempt count when a non-create event arrives before proposal creation', async () => {
-    const archive = { incrementAttemptCount: vi.fn().mockResolvedValue(undefined) };
+  it('holds a non-create event that arrives before proposal creation, sparing the attempt count', async () => {
+    const archive = {
+      incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
+      markHeld: vi.fn().mockResolvedValue(undefined),
+    };
+    const metrics = makeMetrics();
     const applier = new AaveGovernanceProjectionApplier({
       pgDb: makeProjectionTx({ existingProposal: undefined }).pgDb as never,
       registry: makeRegistry(),
@@ -716,13 +769,45 @@ describe('AaveGovernanceProjectionApplier', () => {
       dlq: { markRetrySucceeded: vi.fn() } as never,
       payloads: { fetchPayloads: vi.fn().mockResolvedValue([ACTIVATED_PAYLOAD]) } as never,
       ipfsFetcher: { fetchTitleDescription: vi.fn() } as never,
-      metrics: makeMetrics(),
+      metrics,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    });
+
+    await applier.applyBatch([{ ...ROW, event_type: 'VotingActivated', received_at: new Date() }]);
+
+    expect(archive.markHeld).toHaveBeenCalledWith('archive-1', expect.any(Date));
+    // The ceiling parks a row permanently, so an out-of-order parent must not spend attempts
+    // before the hold bound elapses.
+    expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'held', reason: 'no_proposal' }),
+    );
+  });
+
+  it('escalates a non-create event whose parent is still absent past the hold bound', async () => {
+    const archive = {
+      incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
+      markHeld: vi.fn().mockResolvedValue(undefined),
+    };
+    const metrics = makeMetrics();
+    const applier = new AaveGovernanceProjectionApplier({
+      pgDb: makeProjectionTx({ existingProposal: undefined }).pgDb as never,
+      registry: makeRegistry(),
+      archive: archive as never,
+      dlq: { markRetrySucceeded: vi.fn() } as never,
+      payloads: { fetchPayloads: vi.fn().mockResolvedValue([ACTIVATED_PAYLOAD]) } as never,
+      ipfsFetcher: { fetchTitleDescription: vi.fn() } as never,
+      metrics,
       logger: { warn: vi.fn(), error: vi.fn() } as never,
     });
 
     await applier.applyBatch([{ ...ROW, event_type: 'VotingActivated' }]);
 
+    expect(archive.markHeld).not.toHaveBeenCalled();
     expect(archive.incrementAttemptCount).toHaveBeenCalledWith('archive-1');
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'failed', reason: 'no_proposal' }),
+    );
   });
 
   it('increments attempt count when the archive payload is missing', async () => {

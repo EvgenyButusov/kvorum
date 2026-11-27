@@ -19,7 +19,8 @@ function notHeld(now: Date) {
  * payload — was reselected every tick forever, until `derivation_attempt_count` overflowed its
  * column and the overflow itself became the failure. The actor-resolution stage has always bounded
  * itself this way (`actor_resolution_attempt_count < attemptThreshold`); this is that bound for the
- * projection stage. Parked rows return to the queue through `derive replay`, which resets the count.
+ * projection stage. Parked rows return to the queue through `derive unpark`, which resets the count
+ * for parked rows only — `derive replay` also clears `derived_at` for a whole source.
  *
  * It arrives in an options object rather than a positional parameter: inserting one ahead of `now`
  * silently rebound every existing `(eventTypes, limit, now)` call site, and the integration and e2e

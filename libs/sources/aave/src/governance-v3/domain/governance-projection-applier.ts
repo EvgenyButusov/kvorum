@@ -13,6 +13,7 @@ import { VoteBlockTimestampFetcher } from '@sources/core';
 import type { AaveIpfsTitleFetcher } from './ipfs-title-fetcher';
 import { projectAaveGovernanceV3Event } from './proposal-projector';
 import type { AaveGovernanceV3Event } from './types';
+import { decideMissingProposalHold } from '../../domain/missing-proposal-hold';
 import { AaveProposalRepository } from '../../persistence/aave-proposal-repository';
 import { insertIpfsTitleDlq } from '../../persistence/ipfs-title-dlq';
 import type { AaveGovernanceArchivePayloadRepository } from '../persistence/archive-payload-repository';
@@ -21,6 +22,7 @@ export type AaveDerivationOutcome =
   | 'derived'
   | 'skipped_state_guard'
   | 'skipped_idempotent'
+  | 'held'
   | 'failed';
 
 export type AaveDerivationFailureReason =
@@ -159,9 +161,11 @@ export class AaveGovernanceProjectionApplier {
 
         await postCommit();
       } catch (error) {
-        const reason =
-          error instanceof ProposalNotFoundError ? 'no_proposal' : 'projection_apply_error';
-        await this.fail(row, reason, error);
+        if (error instanceof ProposalNotFoundError) {
+          await this.holdOrFailMissingProposal(row, error);
+          continue;
+        }
+        await this.fail(row, 'projection_apply_error', error);
       }
     }
   }
@@ -446,6 +450,19 @@ export class AaveGovernanceProjectionApplier {
         tx,
       ),
     );
+  }
+
+  private async holdOrFailMissingProposal(
+    row: ArchiveDerivationRow,
+    error: ProposalNotFoundError,
+  ): Promise<void> {
+    const decision = decideMissingProposalHold(row.received_at);
+    if (decision.action === 'hold') {
+      await this.deps.archive.markHeld(row.id, decision.until);
+      this.record(row, 'held', 'no_proposal');
+      return;
+    }
+    await this.fail(row, 'no_proposal', error);
   }
 
   private async fail(
