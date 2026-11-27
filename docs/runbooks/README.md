@@ -10,6 +10,7 @@ Operational runbooks for Kvorum. Each runbook is self-contained and assumes a fr
 | [clickhouse-system-log-cleanup.md](clickhouse-system-log-cleanup.md)     | Stop and clean up a ClickHouse system-log merge feedback loop      |
 | [clickhouse-memory-tracker-drift.md](clickhouse-memory-tracker-drift.md) | ClickHouse refuses queries while its resident set is under the cap |
 | [ingestion-dlq.md](ingestion-dlq.md)                                     | Triage and re-drive dead-lettered chain events                     |
+| [derivation-parked-rows.md](derivation-parked-rows.md)                   | Return rows past the derivation attempt ceiling to the queue       |
 | [gap-fill.md](gap-fill.md)                                               | Startup ingestion gap behavior and manual catch-up operation       |
 | [m3-chains.md](m3-chains.md)                                             | Multi-chain `CHAIN_CONFIG` and per-chain `headLag` provisioning    |
 | [lido-production-rollout.md](lido-production-rollout.md)                 | Backfill, validate, activate, and roll back Lido in production     |

@@ -122,4 +122,49 @@ describe('archive reconcile cursor rewind', () => {
     expect(query.sql).toContain('from "archive_reconcile_cursor"');
     expect(query.sql).toContain('"last_checked_block" > $1');
   });
+
+  it('unparks only un-derived rows at or past the ceiling, leaving derived_at alone', async () => {
+    const { execute, repo } = await realDialect();
+    execute.mockResolvedValue({ rows: [], numAffectedRows: 12n });
+
+    await expect(repo.unparkExhausted(50)).resolves.toBe(12);
+
+    const query = execute.mock.calls[0]![0];
+    expect(query.sql).toContain('update "archive_event" set "derivation_attempt_count" = $1');
+    expect(query.sql).toContain('"derived_at" is null');
+    expect(query.sql).toContain('"derivation_attempt_count" >= $2');
+    // Clearing derived_at here would un-derive rows an operator never asked to replay.
+    expect(query.sql).not.toContain('"derived_at" = ');
+    expect(query.parameters).toEqual([0, 50]);
+  });
+
+  it('scopes an unpark to the requested source types', async () => {
+    const { execute, repo } = await realDialect();
+    execute.mockResolvedValue({ rows: [], numAffectedRows: 2n });
+
+    await repo.unparkExhausted(50, ['aave_governance_v3']);
+
+    const query = execute.mock.calls[0]![0];
+    expect(query.sql).toContain('"source_type" in ($3)');
+    expect(query.parameters).toEqual([0, 50, 'aave_governance_v3']);
+  });
+
+  it('counts parked rows grouped by source type', async () => {
+    const { execute, repo } = await realDialect();
+    execute.mockResolvedValue({
+      rows: [
+        { source_type: 'aave_governance_v3', count: '12' },
+        { source_type: 'aave_payloads_controller', count: '50' },
+      ],
+    });
+
+    await expect(repo.countParkedBySourceType(50)).resolves.toEqual([
+      { source_type: 'aave_governance_v3', count: 12 },
+      { source_type: 'aave_payloads_controller', count: 50 },
+    ]);
+
+    const query = execute.mock.calls[0]![0];
+    expect(query.sql).toContain('"derived_at" is null');
+    expect(query.sql).toContain('group by "source_type"');
+  });
 });

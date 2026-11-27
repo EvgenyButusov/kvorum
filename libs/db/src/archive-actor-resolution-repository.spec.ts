@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ArchiveActorResolutionRepository } from './archive-actor-resolution-repository';
+import {
+  ArchiveActorResolutionRepository,
+  DEFAULT_MAX_DERIVATION_ATTEMPTS,
+  resolveMaxDerivationAttempts,
+} from './archive-actor-resolution-repository';
 import type { ArchiveDerivationRow } from './archive-derivation-repository';
 
 const ARCHIVE_ROW: ArchiveDerivationRow = {
@@ -359,4 +363,19 @@ describe('ArchiveActorResolutionRepository', () => {
       expect(select.selectFrom).not.toHaveBeenCalled();
     });
   });
+});
+
+describe('resolveMaxDerivationAttempts', () => {
+  it('uses the configured override', () => {
+    expect(resolveMaxDerivationAttempts({ DERIVATION_MAX_ATTEMPTS: '7' })).toBe(7);
+  });
+
+  it.each([['0'], ['-1'], ['abc'], [undefined]])(
+    'falls back to the default for %s, which would otherwise park every row',
+    (value) => {
+      expect(resolveMaxDerivationAttempts({ DERIVATION_MAX_ATTEMPTS: value })).toBe(
+        DEFAULT_MAX_DERIVATION_ATTEMPTS,
+      );
+    },
+  );
 });

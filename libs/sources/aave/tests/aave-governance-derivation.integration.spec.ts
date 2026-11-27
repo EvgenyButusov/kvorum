@@ -199,6 +199,80 @@ describeIf('aave governance derivation integration', () => {
     }
   }
 
+  it('recovers a lifecycle event parked past the ceiling once its proposal is created', async () => {
+    // The production shape: the create event was lost, so ProposalExecuted spent every attempt on an
+    // absent parent and the ceiling excluded it for good. Re-driving the create must bring it back,
+    // or the proposal keeps a state ADR-0049 forbids the reconciler from correcting.
+    await insertArchivedEvent({
+      eventType: 'ProposalExecuted',
+      blockNumber: 104n,
+      logIndex: 4,
+      txHash: numberedHash(204),
+      blockHash: numberedHash(1004),
+      payload: { proposalId: PROPOSAL_ID },
+    });
+    await sql`UPDATE archive_event SET derivation_attempt_count = 60, derivation_actor_resolved_at = now() WHERE event_type = 'ProposalExecuted'`.execute(
+      pgDb,
+    );
+
+    const applier = new AaveGovernanceProjectionApplier({
+      pgDb,
+      archive,
+      dlq,
+      payloads,
+      ipfsFetcher: {
+        fetchTitleDescription: vi.fn().mockResolvedValue({ kind: 'no_title' }),
+      } as never,
+      registry: fakeRegistry,
+      metrics: {
+        batchLookupSeconds: () => undefined,
+        processed: () => undefined,
+        ipfsTitleFetch: () => undefined,
+      },
+      logger: silentLogger,
+    });
+
+    // Parked, so the derivable query does not offer it however many times the worker ticks.
+    expect(await actorResolution.findDerivableBy(applier.eventTypes, 20)).toHaveLength(0);
+
+    await insertArchivedEvent({
+      eventType: 'ProposalCreated',
+      blockNumber: 100n,
+      logIndex: 0,
+      txHash: numberedHash(200),
+      blockHash: numberedHash(1000),
+      payload: {
+        proposalId: PROPOSAL_ID,
+        creator: PROPOSER,
+        accessLevel: 1,
+        ipfsHash: '0x' + DESCRIPTION_HASH,
+        votingPortal: '0x' + '22'.repeat(20),
+        payloads: [],
+      },
+    });
+    await resolveActors();
+
+    await applier.applyBatch(await actorResolution.findDerivableBy(applier.eventTypes, 20));
+
+    const parked = await pgDb
+      .selectFrom('archive_event')
+      .select(['derivation_attempt_count', 'derived_at'])
+      .where('event_type', '=', 'ProposalExecuted')
+      .executeTakeFirstOrThrow();
+    expect(Number(parked.derivation_attempt_count)).toBe(0);
+    expect(parked.derived_at).toBeNull();
+
+    // And it now derives, which is what moves the proposal off its stale state.
+    await applier.applyBatch(await actorResolution.findDerivableBy(applier.eventTypes, 20));
+
+    const proposal = await pgDb
+      .selectFrom('proposal')
+      .select(['state'])
+      .where('source_id', '=', PROPOSAL_ID)
+      .executeTakeFirstOrThrow();
+    expect(proposal.state).toBe('executed');
+  }, 30_000);
+
   it('derives an archived Aave proposal lifecycle into proposal state, metadata, payloads, and title enrichment', async () => {
     await insertArchivedEvent({
       eventType: 'ProposalCreated',

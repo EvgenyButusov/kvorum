@@ -91,6 +91,7 @@ function makeMetrics() {
     batchLookupSeconds: vi.fn(),
     processed: vi.fn(),
     ipfsTitleFetch: vi.fn(),
+    unparked: vi.fn(),
   };
 }
 
@@ -109,6 +110,7 @@ function makeProjectionTx(
     insertedDlq: undefined as unknown,
     markedDerivedId: undefined as string | undefined,
     markedActorResolvedId: undefined as string | undefined,
+    proposalSet: undefined as Record<string, unknown> | undefined,
     transactionCount: 0,
   };
   const proposalInserted = options.proposalInserted ?? true;
@@ -177,6 +179,7 @@ function makeProjectionTx(
       let lastArchiveSet: 'derived' | 'actor_resolved' | undefined;
       const updateChain = chain({
         set: vi.fn((values: Record<string, unknown>) => {
+          if (table === 'proposal' && 'state' in values) calls.proposalSet = values;
           if (table === 'archive_event') {
             if ('derivation_actor_resolved_at' in values) lastArchiveSet = 'actor_resolved';
             if ('derived_at' in values) lastArchiveSet = 'derived';
@@ -190,7 +193,9 @@ function makeProjectionTx(
           }
           return updateChain;
         }),
-        execute: vi.fn().mockResolvedValue(undefined),
+        // The unpark path reads back the rows it reset, so the chain must offer `returning`.
+        returning: vi.fn(() => updateChain),
+        execute: vi.fn().mockResolvedValue([]),
         executeTakeFirst: vi.fn(async () => {
           if (table === 'proposal') return { numUpdatedRows: BigInt(advanceStateRows) };
           return undefined;
@@ -572,6 +577,147 @@ describe('AaveGovernanceProjectionApplier', () => {
     );
   });
 
+  it('unparks the source rows when a proposal is first inserted', async () => {
+    const { pgDb } = makeProjectionTx();
+    vi.spyOn(ProposalRepository.prototype, 'insertProposal').mockResolvedValue({
+      inserted: true,
+      proposalId: 'proposal-1',
+    });
+    vi.spyOn(AaveProposalRepository.prototype, 'insertMetadata').mockResolvedValue(undefined);
+    vi.spyOn(ProposalRepository.prototype, 'ensureChoices').mockResolvedValue(undefined);
+    vi.spyOn(ProposalRepository.prototype, 'findDaoIdForSource').mockResolvedValue('dao-1');
+    vi.spyOn(ActorRepository.prototype, 'findOrCreateActorAddress').mockResolvedValue({
+      id: 'actor-1',
+    } as never);
+    vi.spyOn(ArchiveDerivationRepository.prototype, 'markDerived').mockResolvedValue(undefined);
+    vi.spyOn(ArchiveActorResolutionRepository.prototype, 'markActorResolved').mockResolvedValue(
+      undefined,
+    );
+    const unpark = vi
+      .spyOn(ArchiveDerivationRepository.prototype, 'unparkForDaoSource')
+      .mockResolvedValue([
+        {
+          source_type: 'aave_governance_v3',
+          chain_id: '0x1',
+          tx_hash: '0xparked',
+          log_index: 9,
+          event_type: 'ProposalExecuted',
+        },
+      ]);
+    const logger = { warn: vi.fn(), error: vi.fn() };
+    const metrics = makeMetrics();
+
+    const applier = new AaveGovernanceProjectionApplier({
+      pgDb: pgDb as never,
+      registry: makeRegistry(),
+      archive: { incrementAttemptCount: vi.fn() } as never,
+      dlq: { markRetrySucceeded: vi.fn().mockResolvedValue('resolved') } as never,
+      payloads: { fetchPayloads: vi.fn().mockResolvedValue([CREATED_PAYLOAD]) } as never,
+      ipfsFetcher: { fetchTitleDescription: vi.fn().mockResolvedValue(undefined) } as never,
+      metrics,
+      logger: logger as never,
+    });
+
+    await applier.applyBatch([ROW]);
+
+    // The parent arriving late is the only thing that makes its orphaned lifecycle rows derivable
+    // again, and nothing else ever re-attempts a row the ceiling has excluded.
+    expect(unpark).toHaveBeenCalledWith('source-1', 50);
+    // A self-repair that only logs is ADR-0091's first failure mode, so it is counted per row and
+    // logged with the archive tuple triage reads.
+    expect(metrics.unparked).toHaveBeenCalledWith(1, { source_type: 'aave_governance_v3' });
+    expect(logger.warn).toHaveBeenCalledWith(
+      'aave_derivation_unparked_on_create',
+      expect.objectContaining({ tx_hash: '0xparked', log_index: 9, parent_source_id: '42' }),
+    );
+  });
+
+  it('does not unpark when the proposal already existed', async () => {
+    const { pgDb } = makeProjectionTx();
+    vi.spyOn(ProposalRepository.prototype, 'insertProposal').mockResolvedValue({
+      inserted: false,
+    } as never);
+    vi.spyOn(ProposalRepository.prototype, 'findDaoIdForSource').mockResolvedValue('dao-1');
+    vi.spyOn(ActorRepository.prototype, 'findOrCreateActorAddress').mockResolvedValue({
+      id: 'actor-1',
+    } as never);
+    vi.spyOn(ArchiveDerivationRepository.prototype, 'markDerived').mockResolvedValue(undefined);
+    vi.spyOn(ArchiveActorResolutionRepository.prototype, 'markActorResolved').mockResolvedValue(
+      undefined,
+    );
+    const unpark = vi
+      .spyOn(ArchiveDerivationRepository.prototype, 'unparkForDaoSource')
+      .mockResolvedValue([]);
+    const metrics = makeMetrics();
+
+    const applier = new AaveGovernanceProjectionApplier({
+      pgDb: pgDb as never,
+      registry: makeRegistry(),
+      archive: { incrementAttemptCount: vi.fn() } as never,
+      dlq: { markRetrySucceeded: vi.fn() } as never,
+      payloads: { fetchPayloads: vi.fn().mockResolvedValue([CREATED_PAYLOAD]) } as never,
+      ipfsFetcher: { fetchTitleDescription: vi.fn() } as never,
+      metrics,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    });
+
+    await applier.applyBatch([ROW]);
+
+    // A re-derived create event unblocks nothing, so repeating it must not hand every parked row
+    // in the source another run at the ceiling.
+    expect(unpark).not.toHaveBeenCalled();
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'skipped_idempotent' }),
+    );
+  });
+
+  it('dates a recovered lifecycle event from its original ingestion, not the replay', async () => {
+    const originallyIngestedAt = new Date('2026-10-11T11:47:20Z');
+    const { pgDb, calls } = makeProjectionTx({
+      existingProposal: { id: 'proposal-1', source_id: '526' },
+    });
+    const archive = {
+      incrementAttemptCount: vi.fn(),
+      markHeld: vi.fn(),
+    };
+    const metrics = makeMetrics();
+
+    const applier = new AaveGovernanceProjectionApplier({
+      pgDb: pgDb as never,
+      registry: makeRegistry(),
+      archive: archive as never,
+      dlq: { markRetrySucceeded: vi.fn() } as never,
+      payloads: {
+        fetchPayloads: vi.fn().mockResolvedValue([
+          {
+            ...CREATED_PAYLOAD,
+            event_type: 'ProposalExecuted',
+            payload: JSON.stringify({ proposalId: '526' }),
+          },
+        ]),
+      } as never,
+      ipfsFetcher: { fetchTitleDescription: vi.fn() } as never,
+      metrics,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    });
+
+    await applier.applyBatch([
+      { ...ROW, event_type: 'ProposalExecuted', received_at: originallyIngestedAt },
+    ]);
+
+    // An unparked row derives long after the fact, so the transition must carry the instant the
+    // event was archived; now() would backdate the proposal's history to the recovery run.
+    expect(calls.proposalSet).toMatchObject({
+      state: 'executed',
+      state_updated_at: originallyIngestedAt,
+    });
+    expect(calls.markedDerivedId).toBe('archive-1');
+    expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'derived', reason: null }),
+    );
+  });
+
   it('records skipped_state_guard when a state transition advances zero rows', async () => {
     const { pgDb } = makeProjectionTx({
       existingProposal: { id: 'proposal-1', source_id: '42' },
@@ -707,8 +853,12 @@ describe('AaveGovernanceProjectionApplier', () => {
     expect(hasActivePayloadsControllerSource).toHaveBeenCalledTimes(1);
   });
 
-  it('increments attempt count when a non-create event arrives before proposal creation', async () => {
-    const archive = { incrementAttemptCount: vi.fn().mockResolvedValue(undefined) };
+  it('holds a non-create event that arrives before proposal creation, sparing the attempt count', async () => {
+    const archive = {
+      incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
+      markHeld: vi.fn().mockResolvedValue(undefined),
+    };
+    const metrics = makeMetrics();
     const applier = new AaveGovernanceProjectionApplier({
       pgDb: makeProjectionTx({ existingProposal: undefined }).pgDb as never,
       registry: makeRegistry(),
@@ -716,13 +866,45 @@ describe('AaveGovernanceProjectionApplier', () => {
       dlq: { markRetrySucceeded: vi.fn() } as never,
       payloads: { fetchPayloads: vi.fn().mockResolvedValue([ACTIVATED_PAYLOAD]) } as never,
       ipfsFetcher: { fetchTitleDescription: vi.fn() } as never,
-      metrics: makeMetrics(),
+      metrics,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    });
+
+    await applier.applyBatch([{ ...ROW, event_type: 'VotingActivated', received_at: new Date() }]);
+
+    expect(archive.markHeld).toHaveBeenCalledWith('archive-1', expect.any(Date));
+    // The ceiling parks a row permanently, so an out-of-order parent must not spend attempts
+    // before the hold bound elapses.
+    expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'held', reason: 'no_proposal' }),
+    );
+  });
+
+  it('escalates a non-create event whose parent is still absent past the hold bound', async () => {
+    const archive = {
+      incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
+      markHeld: vi.fn().mockResolvedValue(undefined),
+    };
+    const metrics = makeMetrics();
+    const applier = new AaveGovernanceProjectionApplier({
+      pgDb: makeProjectionTx({ existingProposal: undefined }).pgDb as never,
+      registry: makeRegistry(),
+      archive: archive as never,
+      dlq: { markRetrySucceeded: vi.fn() } as never,
+      payloads: { fetchPayloads: vi.fn().mockResolvedValue([ACTIVATED_PAYLOAD]) } as never,
+      ipfsFetcher: { fetchTitleDescription: vi.fn() } as never,
+      metrics,
       logger: { warn: vi.fn(), error: vi.fn() } as never,
     });
 
     await applier.applyBatch([{ ...ROW, event_type: 'VotingActivated' }]);
 
+    expect(archive.markHeld).not.toHaveBeenCalled();
     expect(archive.incrementAttemptCount).toHaveBeenCalledWith('archive-1');
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'failed', reason: 'no_proposal' }),
+    );
   });
 
   it('increments attempt count when the archive payload is missing', async () => {

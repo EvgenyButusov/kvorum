@@ -5,14 +5,17 @@ import {
   ArchiveActorResolutionRepository,
   ArchiveDerivationRepository,
   type ArchiveDerivationRow,
+  type UnparkedArchiveRow,
   DlqRepository,
   type PgDatabase,
   ProposalRepository,
+  resolveMaxDerivationAttempts,
 } from '@libs/db';
 import { VoteBlockTimestampFetcher } from '@sources/core';
 import type { AaveIpfsTitleFetcher } from './ipfs-title-fetcher';
 import { projectAaveGovernanceV3Event } from './proposal-projector';
 import type { AaveGovernanceV3Event } from './types';
+import { decideMissingProposalHold } from '../../domain/missing-proposal-hold';
 import { AaveProposalRepository } from '../../persistence/aave-proposal-repository';
 import { insertIpfsTitleDlq } from '../../persistence/ipfs-title-dlq';
 import type { AaveGovernanceArchivePayloadRepository } from '../persistence/archive-payload-repository';
@@ -21,6 +24,7 @@ export type AaveDerivationOutcome =
   | 'derived'
   | 'skipped_state_guard'
   | 'skipped_idempotent'
+  | 'held'
   | 'failed';
 
 export type AaveDerivationFailureReason =
@@ -39,6 +43,8 @@ export interface AaveGovernanceProjectionMetrics {
     reason: AaveDerivationFailureReason | null;
   }): void;
   ipfsTitleFetch?(outcome: 'resolved' | 'fallback_title' | 'dlq'): void;
+  /** One increment per archive row an insert returned to the queue (ADR-0091: per record). */
+  unparked?(rows: number, labels: { source_type: string }): void;
 }
 
 export interface AaveGovernanceProjectionApplierDeps {
@@ -159,9 +165,11 @@ export class AaveGovernanceProjectionApplier {
 
         await postCommit();
       } catch (error) {
-        const reason =
-          error instanceof ProposalNotFoundError ? 'no_proposal' : 'projection_apply_error';
-        await this.fail(row, reason, error);
+        if (error instanceof ProposalNotFoundError) {
+          await this.holdOrFailMissingProposal(row, error);
+          continue;
+        }
+        await this.fail(row, 'projection_apply_error', error);
       }
     }
   }
@@ -187,6 +195,7 @@ export class AaveGovernanceProjectionApplier {
 
     let dlqId: string | undefined;
     let proposalId: string | undefined;
+    let unparked: UnparkedArchiveRow[] = [];
 
     if (result.inserted) {
       proposalId = result.proposalId;
@@ -203,6 +212,10 @@ export class AaveGovernanceProjectionApplier {
         descriptionHash: projection.descriptionHash,
         source: 'indexer.aave_governance_v3',
       });
+      unparked = await repositories.archive.unparkForDaoSource(
+        row.dao_source_id,
+        resolveMaxDerivationAttempts(),
+      );
       this.record(row, 'derived', null);
     } else {
       this.record(row, 'skipped_idempotent', null);
@@ -212,9 +225,28 @@ export class AaveGovernanceProjectionApplier {
     await repositories.actorResolution.markActorResolved(row.id);
 
     return async () => {
+      this.recordUnparked(unparked, projection.proposal.source_id);
       if (!result.inserted || dlqId === undefined || proposalId === undefined) return;
       await this.handleIpfsEnrichment(proposalId, projection.descriptionHash, dlqId);
     };
+  }
+
+  /**
+   * Reported after the insert commits, not inside it: a repair recorded for a transaction that
+   * later rolls back is evidence of work that never happened (ADR-0091).
+   */
+  private recordUnparked(rows: readonly UnparkedArchiveRow[], sourceId: string): void {
+    for (const unparkedRow of rows) {
+      this.deps.metrics.unparked?.(1, { source_type: unparkedRow.source_type });
+      this.logger.warn('aave_derivation_unparked_on_create', {
+        source_type: unparkedRow.source_type,
+        chain_id: unparkedRow.chain_id,
+        tx_hash: unparkedRow.tx_hash,
+        log_index: unparkedRow.log_index,
+        event_type: unparkedRow.event_type,
+        parent_source_id: sourceId,
+      });
+    }
   }
 
   /**
@@ -446,6 +478,19 @@ export class AaveGovernanceProjectionApplier {
         tx,
       ),
     );
+  }
+
+  private async holdOrFailMissingProposal(
+    row: ArchiveDerivationRow,
+    error: ProposalNotFoundError,
+  ): Promise<void> {
+    const decision = decideMissingProposalHold(row.received_at);
+    if (decision.action === 'hold') {
+      await this.deps.archive.markHeld(row.id, decision.until);
+      this.record(row, 'held', 'no_proposal');
+      return;
+    }
+    await this.fail(row, 'no_proposal', error);
   }
 
   private async fail(

@@ -83,6 +83,45 @@ export class ArchiveDerivationAdminRepository {
     return Number(result?.numUpdatedRows ?? 0n);
   }
 
+  /** Un-derived rows the projection attempt ceiling has parked, per source type. */
+  async countParkedBySourceType(
+    maxAttempts: number,
+    sourceTypes?: readonly string[],
+  ): Promise<{ source_type: string; count: number }[]> {
+    let query = this.pgDb
+      .selectFrom('archive_event')
+      .select(['source_type', (eb) => eb.fn.countAll<string>().as('count')])
+      .where('derived_at', 'is', null)
+      .where('derivation_attempt_count', '>=', maxAttempts);
+
+    if (sourceTypes != null && sourceTypes.length > 0) {
+      query = query.where('source_type', 'in', sourceTypes as never[]);
+    }
+
+    const rows = await query.groupBy('source_type').orderBy('source_type', 'asc').execute();
+    return rows.map((row) => ({ source_type: row.source_type, count: Number(row.count) }));
+  }
+
+  /**
+   * Returns parked rows to the derivable queue by clearing only the attempt counter. `derived_at`
+   * is both filtered on and left alone, so this can never un-derive an already-applied row the way
+   * a whole-source `derive replay` does. Re-running it is a no-op once the rows have derived.
+   */
+  async unparkExhausted(maxAttempts: number, sourceTypes?: readonly string[]): Promise<number> {
+    let query = this.pgDb
+      .updateTable('archive_event')
+      .set({ derivation_attempt_count: 0 })
+      .where('derived_at', 'is', null)
+      .where('derivation_attempt_count', '>=', maxAttempts);
+
+    if (sourceTypes != null && sourceTypes.length > 0) {
+      query = query.where('source_type', 'in', sourceTypes as never[]);
+    }
+
+    const result = await query.executeTakeFirst();
+    return Number(result?.numUpdatedRows ?? 0n);
+  }
+
   async resetWatermarkByConfirmationId(archiveConfirmationId: string): Promise<number> {
     const result = await this.pgDb
       .updateTable('archive_event')

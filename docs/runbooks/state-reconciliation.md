@@ -215,8 +215,11 @@ requeueing, because a requeue without a fix parks the row again 50 ticks later.
 sum by (source_type) (indexer_derivation_parked_rows) or vector(0)
 ```
 
-Requeue a parked row with `derive replay <dao_source_id>`, which resets both the watermark and the
-attempt count for the source.
+Requeue parked rows with `derive unpark`, which resets the attempt count for past-ceiling rows only.
+See [derivation-parked-rows.md](derivation-parked-rows.md) for the triage that comes first — notably
+that a row quarantined in a projection DLQ appears in this gauge but will not move until the DLQ row
+is cleared. `derive replay <dao_source_id>` is the blunt alternative: it also clears `derived_at`, so
+it re-derives the source's whole history.
 
 ## Held derivations
 
@@ -242,9 +245,13 @@ orphaned payload or a correlation mismatch in `chain_id`, the payloads-controlle
 
 A vote or lifecycle event whose parent proposal has not derived yet is held, not failed: a catch-up
 can archive it before its creation. `ProposalCreated` precedes both in block order on one chain, so
-a parent still missing after `COMPOUND_MISSING_PROPOSAL_HOLD_MAX_MS` (default two hours, measured
-from `archive_event.received_at`) is an ingestion gap rather than ordering — which is long enough
-for the archive audit above to restore it on one of its ticks.
+a parent still missing after the source's hold bound (`COMPOUND_MISSING_PROPOSAL_HOLD_MAX_MS` or
+`AAVE_MISSING_PROPOSAL_HOLD_MAX_MS`, default two hours, measured from `archive_event.received_at`) is
+an ingestion gap rather than ordering — which is long enough for the archive audit above to restore
+it on one of its ticks. Past the bound the row escalates and walks to the attempt ceiling. For Aave
+the parent's own insert then unparks that `dao_source`, so the row recovers once the create event
+derives; for Compound an ingestion gap repaired days later leaves a parked row needing
+`derive unpark`.
 
 Past the bound the row stops being held. A vote goes through the normal vote-projection failure
 path and is quarantined in `ingestion_dlq` once `VOTE_PROJECTION_DLQ_THRESHOLD` attempts are spent;

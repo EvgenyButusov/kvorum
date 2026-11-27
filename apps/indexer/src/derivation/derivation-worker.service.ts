@@ -4,7 +4,7 @@ import { Interval } from '@nestjs/schedule';
 import {
   ArchiveActorResolutionRepository,
   ArchiveDerivationRepository,
-  DEFAULT_MAX_DERIVATION_ATTEMPTS,
+  resolveMaxDerivationAttempts,
   type ArchiveDerivationRow,
   type OffchainArchiveRow,
 } from '@libs/db';
@@ -21,13 +21,6 @@ import { derivationMetrics } from './derivation-metrics';
 const DERIVATION_INTERVAL_MS = readIntervalMs('DERIVATION_INTERVAL_MS', 5_000);
 const DEFAULT_DERIVATION_BATCH_SIZE = 50;
 
-/** A non-numeric or non-positive override would park every row, so it falls back to the default. */
-function resolveMaxAttempts(): number {
-  const configured = Number(process.env['DERIVATION_MAX_ATTEMPTS']);
-  return Number.isFinite(configured) && configured > 0
-    ? configured
-    : DEFAULT_MAX_DERIVATION_ATTEMPTS;
-}
 const PROGRESS_LOG_INTERVAL_MS = 30_000;
 
 type ChainContextRegistryLike = object;
@@ -75,7 +68,7 @@ export class DerivationWorkerService implements OnApplicationBootstrap {
       const batchSize = Number(
         process.env['DERIVATION_BATCH_SIZE'] ?? DEFAULT_DERIVATION_BATCH_SIZE,
       );
-      const maxAttempts = resolveMaxAttempts();
+      const maxAttempts = resolveMaxDerivationAttempts();
       const derivableAt = new Date();
       const watermark = await this.actorResolution.findDerivableBy(
         this.eventTypes,

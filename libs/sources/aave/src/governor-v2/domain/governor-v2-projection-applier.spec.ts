@@ -64,6 +64,7 @@ function makeMetrics() {
     batchLookupSeconds: vi.fn(),
     processed: vi.fn(),
     ipfsTitleFetch: vi.fn(),
+    unparked: vi.fn(),
   };
 }
 
@@ -156,7 +157,9 @@ function makeProjectionTx(
           }
           return updateChain;
         }),
-        execute: vi.fn().mockResolvedValue(undefined),
+        // The unpark path reads back the rows it reset, so the chain must offer `returning`.
+        returning: vi.fn(() => updateChain),
+        execute: vi.fn().mockResolvedValue([]),
         executeTakeFirst: vi.fn(async () => {
           if (table === 'proposal') return { numUpdatedRows: BigInt(advanceStateRows) };
           return undefined;
@@ -201,6 +204,88 @@ describe('AaveGovernorV2ProjectionApplier', () => {
       'ProposalExecuted',
       'ProposalCanceled',
     ]);
+  });
+
+  it('unparks the source rows when a proposal is first inserted', async () => {
+    const { pgDb } = makeProjectionTx();
+    vi.spyOn(ProposalRepository.prototype, 'insertProposal').mockResolvedValue({
+      inserted: true,
+      proposalId: 'proposal-1',
+    });
+    vi.spyOn(AaveProposalRepository.prototype, 'insertMetadata').mockResolvedValue(undefined);
+    vi.spyOn(ProposalRepository.prototype, 'ensureChoices').mockResolvedValue(undefined);
+    vi.spyOn(ProposalRepository.prototype, 'insertActions').mockResolvedValue(undefined);
+    vi.spyOn(ProposalRepository.prototype, 'findDaoIdForSource').mockResolvedValue('dao-1');
+    vi.spyOn(ActorRepository.prototype, 'findOrCreateActorAddress').mockResolvedValue({
+      id: 'actor-1',
+    } as never);
+    vi.spyOn(ArchiveDerivationRepository.prototype, 'markDerived').mockResolvedValue(undefined);
+    vi.spyOn(ArchiveActorResolutionRepository.prototype, 'markActorResolved').mockResolvedValue(
+      undefined,
+    );
+    const unpark = vi
+      .spyOn(ArchiveDerivationRepository.prototype, 'unparkForDaoSource')
+      .mockResolvedValue([
+        {
+          source_type: 'aave_governor_v2',
+          chain_id: '0x1',
+          tx_hash: '0xparked',
+          log_index: 4,
+          event_type: 'ProposalQueued',
+        },
+      ]);
+    const metrics = makeMetrics();
+
+    const applier = new AaveGovernorV2ProjectionApplier({
+      pgDb: pgDb as never,
+      archive: { incrementAttemptCount: vi.fn() } as never,
+      dlq: { markRetrySucceeded: vi.fn().mockResolvedValue('resolved') } as never,
+      payloads: { fetchPayloads: vi.fn().mockResolvedValue([CREATED_PAYLOAD]) } as never,
+      ipfsFetcher: { fetchTitleDescription: vi.fn().mockResolvedValue(undefined) } as never,
+      metrics,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    });
+
+    await applier.applyBatch([ROW]);
+
+    // The parent arriving late is the only thing that makes its orphaned lifecycle rows derivable
+    // again, and nothing else ever re-attempts a row the ceiling has excluded.
+    expect(unpark).toHaveBeenCalledWith('source-1', 50);
+    expect(metrics.unparked).toHaveBeenCalledWith(1, { source_type: 'aave_governor_v2' });
+  });
+
+  it('does not unpark when the proposal already existed', async () => {
+    const { pgDb } = makeProjectionTx();
+    vi.spyOn(ProposalRepository.prototype, 'insertProposal').mockResolvedValue({
+      inserted: false,
+    } as never);
+    vi.spyOn(ProposalRepository.prototype, 'findDaoIdForSource').mockResolvedValue('dao-1');
+    vi.spyOn(ActorRepository.prototype, 'findOrCreateActorAddress').mockResolvedValue({
+      id: 'actor-1',
+    } as never);
+    vi.spyOn(ArchiveDerivationRepository.prototype, 'markDerived').mockResolvedValue(undefined);
+    vi.spyOn(ArchiveActorResolutionRepository.prototype, 'markActorResolved').mockResolvedValue(
+      undefined,
+    );
+    const unpark = vi
+      .spyOn(ArchiveDerivationRepository.prototype, 'unparkForDaoSource')
+      .mockResolvedValue([]);
+
+    const applier = new AaveGovernorV2ProjectionApplier({
+      pgDb: pgDb as never,
+      archive: { incrementAttemptCount: vi.fn() } as never,
+      dlq: { markRetrySucceeded: vi.fn() } as never,
+      payloads: { fetchPayloads: vi.fn().mockResolvedValue([CREATED_PAYLOAD]) } as never,
+      ipfsFetcher: { fetchTitleDescription: vi.fn() } as never,
+      metrics: makeMetrics(),
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    });
+
+    await applier.applyBatch([ROW]);
+
+    // A re-derived create event unblocks nothing, so repeating it must not hand every parked row
+    // in the source another run at the ceiling.
+    expect(unpark).not.toHaveBeenCalled();
   });
 
   it('projects ProposalCreated, inserts title DLQ, and enriches title after commit', async () => {
@@ -483,8 +568,37 @@ describe('AaveGovernorV2ProjectionApplier', () => {
     );
   });
 
-  it('increments attempt count and fails with no_proposal when proposal not found', async () => {
-    const archive = { incrementAttemptCount: vi.fn().mockResolvedValue(undefined) };
+  it('holds a lifecycle event whose parent is not derived yet, sparing the attempt count', async () => {
+    const archive = {
+      incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
+      markHeld: vi.fn().mockResolvedValue(undefined),
+    };
+    const metrics = makeMetrics();
+
+    const applier = new AaveGovernorV2ProjectionApplier({
+      pgDb: makeProjectionTx({ existingProposal: undefined }).pgDb as never,
+      archive: archive as never,
+      dlq: { markRetrySucceeded: vi.fn() } as never,
+      payloads: { fetchPayloads: vi.fn().mockResolvedValue([QUEUED_PAYLOAD]) } as never,
+      ipfsFetcher: { fetchTitleDescription: vi.fn() } as never,
+      metrics,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    });
+
+    await applier.applyBatch([{ ...ROW, event_type: 'ProposalQueued', received_at: new Date() }]);
+
+    expect(archive.markHeld).toHaveBeenCalledWith('archive-1', expect.any(Date));
+    expect(archive.incrementAttemptCount).not.toHaveBeenCalled();
+    expect(metrics.processed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'held', reason: 'no_proposal' }),
+    );
+  });
+
+  it('escalates to no_proposal once the parent is still absent past the hold bound', async () => {
+    const archive = {
+      incrementAttemptCount: vi.fn().mockResolvedValue(undefined),
+      markHeld: vi.fn().mockResolvedValue(undefined),
+    };
     const metrics = makeMetrics();
     const logger = { warn: vi.fn(), error: vi.fn() };
 

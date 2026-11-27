@@ -19,13 +19,26 @@ function notHeld(now: Date) {
  * payload — was reselected every tick forever, until `derivation_attempt_count` overflowed its
  * column and the overflow itself became the failure. The actor-resolution stage has always bounded
  * itself this way (`actor_resolution_attempt_count < attemptThreshold`); this is that bound for the
- * projection stage. Parked rows return to the queue through `derive replay`, which resets the count.
+ * projection stage. Parked rows return to the queue through `derive unpark`, which resets the count
+ * for parked rows only — `derive replay` also clears `derived_at` for a whole source.
  *
  * It arrives in an options object rather than a positional parameter: inserting one ahead of `now`
  * silently rebound every existing `(eventTypes, limit, now)` call site, and the integration and e2e
  * suites that caught it are outside the typecheck projects.
  */
 export const DEFAULT_MAX_DERIVATION_ATTEMPTS = 50;
+
+/**
+ * The effective ceiling. Lives here rather than in the worker because the applier and
+ * `derive unpark` compare against it too, and a second copy reading the same variable would drift
+ * silently. A non-numeric or non-positive override would park every row, so it falls back.
+ */
+export function resolveMaxDerivationAttempts(env: NodeJS.ProcessEnv = process.env): number {
+  const configured = Number(env['DERIVATION_MAX_ATTEMPTS']);
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_DERIVATION_ATTEMPTS;
+}
 
 function notExhausted(maxAttempts: number) {
   return (eb: ExpressionBuilder<PgDatabase, 'archive_event'>) =>

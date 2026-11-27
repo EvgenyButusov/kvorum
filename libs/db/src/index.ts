@@ -34,6 +34,7 @@ export type { ActiveApiKeyResult, SafeApiKey } from './api-key-repository';
 export { ApiKeyRepository } from './api-key-repository';
 export type {
   ArchiveDerivationRow,
+  UnparkedArchiveRow,
   EvmArchiveTuple,
   OffchainArchiveRow,
 } from './archive-derivation-repository';
@@ -42,6 +43,7 @@ export { ArchiveDerivationAdminRepository } from './archive-derivation-admin-rep
 export {
   ArchiveActorResolutionRepository,
   DEFAULT_MAX_DERIVATION_ATTEMPTS,
+  resolveMaxDerivationAttempts,
 } from './archive-actor-resolution-repository';
 export type { ArchiveEventKey, ArchiveEventExternalKey } from './archive-event-repository';
 export { ArchiveEventRepository } from './archive-event-repository';
